@@ -41,10 +41,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("⚙️ Управление", callback_data="manage")],
     ]
 
-    # Add Web App button if available
-    webapp_url = f"http://{_get_host()}:8000/telegram-app"
     keyboard.append([
-        InlineKeyboardButton("📱 Открыть панель", web_app=WebAppInfo(url=webapp_url))
+        InlineKeyboardButton("🌐 Открыть панель", url=f"http://{_get_host()}:8000")
     ])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
