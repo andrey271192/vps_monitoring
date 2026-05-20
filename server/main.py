@@ -60,13 +60,14 @@ app = FastAPI(title="VPS Monitoring", lifespan=lifespan)
 
 # Static files
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
-# Static downloads (Windows agent)
+# Static downloads (Windows agent) — mount BEFORE /static to avoid prefix conflict
 DOWNLOADS_DIR = os.path.join(os.path.dirname(BASE_DIR), "windows")
 if os.path.isdir(DOWNLOADS_DIR):
     app.mount("/static/downloads", StaticFiles(directory=DOWNLOADS_DIR), name="downloads")
+
+app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
 # Include routers
 app.include_router(servers_router)
