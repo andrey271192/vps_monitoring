@@ -1,33 +1,50 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ru" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VPS Monitoring — Вход</title>
+    <title>VPS Monitoring — Login</title>
     <link rel="stylesheet" href="/static/css/style.css">
+    <script src="/static/js/theme.js"></script>
+    <script src="/static/js/i18n.js"></script>
 </head>
 <body class="login-page">
     <div class="login-container">
         <div class="login-card">
             <div class="login-header">
                 <h1>🖥 VPS Monitoring</h1>
-                <p>Панель мониторинга серверов</p>
+                <p data-i18n="login">Вход</p>
+                <div style="margin-top:12px;display:flex;gap:8px;justify-content:center">
+                    <button class="lang-btn" id="langBtn" onclick="toggleLang(); updateLoginTexts()">RU</button>
+                    <button class="btn-icon" id="themeToggleBtn" onclick="toggleTheme()" style="width:32px;height:32px;font-size:14px">🌙</button>
+                </div>
             </div>
             <form id="loginForm">
                 <div class="form-group">
-                    <label for="username">Логин</label>
+                    <label for="username" id="lbl-user">Логин</label>
                     <input type="text" id="username" name="username" required autofocus>
                 </div>
                 <div class="form-group">
-                    <label for="password">Пароль</label>
+                    <label for="password" id="lbl-pass">Пароль</label>
                     <input type="password" id="password" name="password" required>
                 </div>
-                <button type="submit" class="btn-primary">Войти</button>
+                <button type="submit" class="btn-primary" id="loginBtn">Войти</button>
                 <div id="error" class="error-msg" style="display:none"></div>
             </form>
         </div>
     </div>
     <script>
+        function updateLoginTexts() {
+            document.getElementById('langBtn').textContent = currentLang.toUpperCase();
+            document.getElementById('lbl-user').textContent = t('username');
+            document.getElementById('lbl-pass').textContent = t('password');
+            document.getElementById('loginBtn').textContent = t('loginBtn');
+        }
+        document.addEventListener('DOMContentLoaded', () => {
+            applyTheme(currentTheme);
+            updateLoginTexts();
+        });
+
         document.getElementById('loginForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const username = document.getElementById('username').value;
@@ -43,11 +60,11 @@
                 if (resp.ok) {
                     window.location.href = '/';
                 } else {
-                    errorEl.textContent = 'Неверный логин или пароль';
+                    errorEl.textContent = t('invalidCreds');
                     errorEl.style.display = 'block';
                 }
             } catch (err) {
-                errorEl.textContent = 'Ошибка подключения';
+                errorEl.textContent = t('connError');
                 errorEl.style.display = 'block';
             }
         });

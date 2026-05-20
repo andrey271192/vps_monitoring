@@ -1,82 +1,85 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ru" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VPS Monitoring</title>
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/xterm.min.css">
+    <script src="/static/js/theme.js"></script>
+    <script src="/static/js/i18n.js"></script>
 </head>
 <body>
     <header>
         <div class="header-left">
-            <h1>🖥 VPS Monitoring</h1>
+            <h1 id="pageTitle">🖥 VPS Monitoring</h1>
         </div>
         <div class="header-right">
-            <button class="btn-icon" onclick="refreshAll()" title="Обновить">🔄</button>
-            <button class="btn-icon" onclick="showSettings()" title="Настройки">⚙️</button>
-            <button class="btn-icon" onclick="logout()" title="Выход">🚪</button>
+            <button class="lang-btn" id="langBtn" onclick="toggleLang()">RU</button>
+            <button class="btn-icon" id="themeToggleBtn" onclick="toggleTheme()" title="Theme">🌙</button>
+            <button class="btn-icon" onclick="refreshAll()" title="Refresh">🔄</button>
+            <button class="btn-icon" onclick="showInstructions()" title="Instructions">📖</button>
+            <button class="btn-icon" onclick="showSettings()" title="Settings">⚙️</button>
+            <button class="btn-icon" onclick="logout()" title="Logout">🚪</button>
         </div>
     </header>
 
     <main>
         <div class="stats-bar">
             <div class="stat-item" id="stat-total">
-                <span class="stat-label">Всего</span>
+                <span class="stat-label" data-i18n="total">Всего</span>
                 <span class="stat-value" id="total-count">0</span>
             </div>
             <div class="stat-item online" id="stat-online">
-                <span class="stat-label">Online</span>
+                <span class="stat-label" data-i18n="online">Online</span>
                 <span class="stat-value" id="online-count">0</span>
             </div>
             <div class="stat-item offline" id="stat-offline">
-                <span class="stat-label">Offline</span>
+                <span class="stat-label" data-i18n="offline">Offline</span>
                 <span class="stat-value" id="offline-count">0</span>
             </div>
         </div>
 
         <div class="toolbar">
-            <button class="btn-primary" onclick="showAddServer()">+ Добавить сервер</button>
+            <button class="btn-primary" id="addServerBtn" onclick="showAddServer()">+ Добавить сервер</button>
         </div>
 
-        <div class="servers-grid" id="servers-grid">
-            <!-- Server cards rendered here -->
-        </div>
+        <div class="servers-grid" id="servers-grid"></div>
     </main>
 
     <!-- Add Server Modal -->
     <div class="modal" id="addServerModal" style="display:none">
         <div class="modal-content">
             <div class="modal-header">
-                <h2>Добавить сервер</h2>
+                <h2 data-i18n="addServer">Добавить сервер</h2>
                 <button class="btn-close" onclick="closeModal('addServerModal')">&times;</button>
             </div>
             <form id="addServerForm">
                 <div class="form-group">
-                    <label>Название</label>
+                    <label data-i18n="serverName">Название</label>
                     <input type="text" name="name" required placeholder="My Server">
                 </div>
                 <div class="form-group">
-                    <label>IP / Host</label>
+                    <label data-i18n="host">IP / Host</label>
                     <input type="text" name="host" required placeholder="192.168.1.1">
                 </div>
                 <div class="form-group">
-                    <label>Порт SSH</label>
+                    <label data-i18n="sshPort">Порт SSH</label>
                     <input type="number" name="port" value="22">
                 </div>
                 <div class="form-group">
-                    <label>Логин</label>
+                    <label data-i18n="sshLogin">Логин</label>
                     <input type="text" name="username" value="root">
                 </div>
                 <div class="form-group">
-                    <label>Пароль</label>
-                    <input type="password" name="password" placeholder="Пароль SSH">
+                    <label data-i18n="sshPassword">Пароль</label>
+                    <input type="password" name="password" placeholder="SSH Password">
                 </div>
                 <div class="form-group">
-                    <label>Описание</label>
-                    <input type="text" name="description" placeholder="Описание сервера">
+                    <label data-i18n="description">Описание</label>
+                    <input type="text" name="description" placeholder="">
                 </div>
-                <button type="submit" class="btn-primary">Добавить</button>
+                <button type="submit" class="btn-primary" data-i18n="add">Добавить</button>
             </form>
         </div>
     </div>
@@ -85,47 +88,58 @@
     <div class="modal" id="settingsModal" style="display:none">
         <div class="modal-content">
             <div class="modal-header">
-                <h2>Настройки</h2>
+                <h2 data-i18n="settings">Настройки</h2>
                 <button class="btn-close" onclick="closeModal('settingsModal')">&times;</button>
             </div>
             <form id="settingsForm">
-                <h3>Авторизация</h3>
+                <h3 data-i18n="auth">Авторизация</h3>
                 <div class="form-group">
-                    <label>Логин</label>
+                    <label data-i18n="username">Логин</label>
                     <input type="text" name="admin_login" id="set_login">
                 </div>
                 <div class="form-group">
-                    <label>Новый пароль</label>
-                    <input type="password" name="admin_password" id="set_password" placeholder="Оставьте пустым, чтобы не менять">
+                    <label data-i18n="newPassword">Новый пароль</label>
+                    <input type="password" name="admin_password" id="set_password" placeholder="">
                 </div>
-                <h3>Telegram</h3>
+                <h3 data-i18n="telegram">Telegram</h3>
                 <div class="form-group">
-                    <label>Bot Token</label>
+                    <label data-i18n="botToken">Bot Token</label>
                     <input type="text" name="telegram_bot_token" id="set_tg_token">
                 </div>
                 <div class="form-group">
-                    <label>Chat ID</label>
+                    <label data-i18n="chatId">Chat ID</label>
                     <input type="text" name="telegram_chat_id" id="set_tg_chat">
                 </div>
-                <h3>Мониторинг</h3>
+                <h3 data-i18n="monitoring">Мониторинг</h3>
                 <div class="form-group">
-                    <label>Интервал опроса (сек)</label>
+                    <label data-i18n="pollInterval">Интервал опроса (сек)</label>
                     <input type="number" name="monitor_interval" id="set_interval" value="60">
                 </div>
                 <div class="form-group">
-                    <label>Порог CPU (%)</label>
+                    <label data-i18n="cpuThreshold">Порог CPU (%)</label>
                     <input type="number" name="alert_cpu_threshold" id="set_cpu" value="90">
                 </div>
                 <div class="form-group">
-                    <label>Порог RAM (%)</label>
+                    <label data-i18n="ramThreshold">Порог RAM (%)</label>
                     <input type="number" name="alert_ram_threshold" id="set_ram" value="90">
                 </div>
                 <div class="form-group">
-                    <label>Порог Disk (%)</label>
+                    <label data-i18n="diskThreshold">Порог Disk (%)</label>
                     <input type="number" name="alert_disk_threshold" id="set_disk" value="90">
                 </div>
-                <button type="submit" class="btn-primary">Сохранить</button>
+                <button type="submit" class="btn-primary" data-i18n="save">Сохранить</button>
             </form>
+        </div>
+    </div>
+
+    <!-- Instructions Modal -->
+    <div class="modal" id="instructionsModal" style="display:none">
+        <div class="modal-content modal-wide">
+            <div class="modal-header">
+                <h2 data-i18n="instructions_title">Инструкции и шпаргалки</h2>
+                <button class="btn-close" onclick="closeModal('instructionsModal')">&times;</button>
+            </div>
+            <div id="instructions-content"></div>
         </div>
     </div>
 

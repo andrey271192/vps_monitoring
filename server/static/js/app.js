@@ -2,6 +2,17 @@ let servers = [];
 let currentTerminal = null;
 let currentWs = null;
 
+// i18n render
+function renderPage() {
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        el.textContent = t(key);
+    });
+    document.getElementById('langBtn').textContent = currentLang.toUpperCase();
+    document.getElementById('addServerBtn').textContent = t('addServer');
+    renderServers();
+}
+
 // Load servers
 async function loadServers() {
     try {
@@ -27,7 +38,7 @@ function renderServers() {
     document.getElementById('offline-count').textContent = offline;
 
     if (!servers.length) {
-        grid.innerHTML = '<div style="text-align:center;padding:60px;opacity:0.5;grid-column:1/-1">Нет серверов. Нажмите "+ Добавить сервер"</div>';
+        grid.innerHTML = `<div style="text-align:center;padding:60px;opacity:0.5;grid-column:1/-1">${t('noServers')}</div>`;
         return;
     }
 
@@ -45,13 +56,14 @@ function renderServers() {
         const id = srv.id || srv.host;
 
         return `
-            <div class="server-card" onclick="showServerDetail('${id}')">
+            <div class="server-card ${isOnline ? 'online' : 'offline'}" onclick="showServerDetail('${id}')">
                 <div class="server-card-header">
                     <div>
                         <div class="name">${srv.name}</div>
                         <div class="host">${srv.host}:${srv.port || 22}</div>
                     </div>
                     <span class="status-badge ${isOnline ? 'online' : 'offline'}">
+                        <span class="status-dot ${isOnline ? 'online' : 'offline'}"></span>
                         ${isOnline ? 'Online' : 'Offline'}
                     </span>
                 </div>
@@ -73,7 +85,7 @@ function renderServers() {
                         <div class="progress-bar"><div class="fill ${diskClass || 'ok'}" style="width:${disk}%"></div></div>
                     </div>
                 </div>
-                ` : '<div style="padding:20px 0;text-align:center;opacity:0.5">Нет данных</div>'}
+                ` : `<div style="padding:20px 0;text-align:center;opacity:0.5">${t('noData')}</div>`}
                 <div class="server-card-actions">
                     <button onclick="event.stopPropagation(); openSSH('${id}', '${srv.name}')">💻 SSH</button>
                     <button onclick="event.stopPropagation(); rebootServer('${id}')">🔄 Reboot</button>
@@ -96,38 +108,41 @@ function showServerDetail(id) {
         <div style="display:grid;gap:12px">
             <div class="form-group">
                 <label>Host</label>
-                <div style="padding:8px;background:var(--bg-primary);border-radius:6px;font-family:monospace">${srv.host}:${srv.port || 22}</div>
+                <div style="padding:8px;background:var(--input-bg);border-radius:6px;font-family:monospace">${srv.host}:${srv.port || 22}</div>
             </div>
             <div class="form-group">
-                <label>Status</label>
-                <div><span class="status-badge ${m.online ? 'online' : 'offline'}">${m.online ? 'Online' : 'Offline'}</span></div>
+                <label>${t('status')}</label>
+                <div><span class="status-badge ${m.online ? 'online' : 'offline'}">
+                    <span class="status-dot ${m.online ? 'online' : 'offline'}"></span>
+                    ${m.online ? 'Online' : 'Offline'}
+                </span></div>
             </div>
             ${m.online ? `
             <div class="form-group">
-                <label>Uptime</label>
-                <div style="padding:8px;background:var(--bg-primary);border-radius:6px">${m.uptime || 'N/A'}</div>
+                <label>${t('uptime')}</label>
+                <div style="padding:8px;background:var(--input-bg);border-radius:6px">${m.uptime || 'N/A'}</div>
             </div>
             <div class="form-group">
-                <label>Load Average</label>
-                <div style="padding:8px;background:var(--bg-primary);border-radius:6px">${m.load_average || 'N/A'}</div>
+                <label>${t('load')}</label>
+                <div style="padding:8px;background:var(--input-bg);border-radius:6px">${m.load_average || 'N/A'}</div>
             </div>
             <div class="form-group">
                 <label>RAM</label>
-                <div style="padding:8px;background:var(--bg-primary);border-radius:6px">${(m.ram_used_mb||0).toFixed(0)} / ${(m.ram_total_mb||0).toFixed(0)} MB (${m.ram_percent||0}%)</div>
+                <div style="padding:8px;background:var(--input-bg);border-radius:6px">${(m.ram_used_mb||0).toFixed(0)} / ${(m.ram_total_mb||0).toFixed(0)} MB (${m.ram_percent||0}%)</div>
             </div>
             <div class="form-group">
                 <label>Disk</label>
-                <div style="padding:8px;background:var(--bg-primary);border-radius:6px">${(m.disk_used_gb||0).toFixed(1)} / ${(m.disk_total_gb||0).toFixed(1)} GB (${m.disk_percent||0}%)</div>
+                <div style="padding:8px;background:var(--input-bg);border-radius:6px">${(m.disk_used_gb||0).toFixed(1)} / ${(m.disk_total_gb||0).toFixed(1)} GB (${m.disk_percent||0}%)</div>
             </div>
             <div class="form-group">
-                <label>Network</label>
-                <div style="padding:8px;background:var(--bg-primary);border-radius:6px">↓ ${(m.network_in_mb||0).toFixed(0)} MB / ↑ ${(m.network_out_mb||0).toFixed(0)} MB</div>
+                <label>${t('network')}</label>
+                <div style="padding:8px;background:var(--input-bg);border-radius:6px">↓ ${(m.network_in_mb||0).toFixed(0)} MB / ↑ ${(m.network_out_mb||0).toFixed(0)} MB</div>
             </div>
             ` : ''}
             ${srv.description ? `
             <div class="form-group">
-                <label>Описание</label>
-                <div style="padding:8px;background:var(--bg-primary);border-radius:6px">${srv.description}</div>
+                <label>${t('description')}</label>
+                <div style="padding:8px;background:var(--input-bg);border-radius:6px">${srv.description}</div>
             </div>
             ` : ''}
         </div>
@@ -136,17 +151,74 @@ function showServerDetail(id) {
     modal.style.display = 'flex';
 }
 
+// Instructions
+function showInstructions() {
+    const content = document.getElementById('instructions-content');
+    content.innerHTML = `
+        <div class="instructions-section">
+            <div class="instr-card">
+                <h4>📥 ${t('instr_install')}</h4>
+                <p>${t('instr_add_server_text').includes('Click') ? 'One command to install on any Ubuntu/Debian server:' : 'Одна команда для установки на Ubuntu/Debian:'}</p>
+                <code>${t('instr_install_text')}</code>
+            </div>
+            <div class="instr-card">
+                <h4>➕ ${t('instr_add_server')}</h4>
+                <p>${t('instr_add_server_text')}</p>
+            </div>
+            <div class="instr-card">
+                <h4>💻 ${t('instr_ssh')}</h4>
+                <p>${t('instr_ssh_text')}</p>
+            </div>
+            <div class="instr-card">
+                <h4>🤖 ${t('instr_telegram')}</h4>
+                <p>${t('instr_telegram_text')}</p>
+            </div>
+            <div class="instr-card">
+                <h4>🔄 ${t('instr_reboot')}</h4>
+                <p>${t('instr_reboot_text')}</p>
+            </div>
+            <div class="instr-card">
+                <h4>⚠️ ${t('instr_thresholds')}</h4>
+                <p>${t('instr_thresholds_text')}</p>
+            </div>
+            <div class="instr-card">
+                <h4>🔧 ${t('instr_commands')}</h4>
+                <ul class="cmd-list">
+                    <li>📊 ${t('instr_cmd_status')}</li>
+                    <li>🔄 ${t('instr_cmd_restart')}</li>
+                    <li>📋 ${t('instr_cmd_logs')}</li>
+                    <li>⬆️ ${t('instr_cmd_update')}</li>
+                </ul>
+            </div>
+            <div class="instr-card">
+                <h4>🔌 ${t('instr_api')}</h4>
+                <ul class="cmd-list">
+                    <li>GET  /api/servers — list all</li>
+                    <li>POST /api/servers — add server</li>
+                    <li>DELETE /api/servers/{id} — remove</li>
+                    <li>POST /api/servers/{id}/reboot — reboot</li>
+                    <li>POST /api/servers/{id}/exec — run command</li>
+                    <li>GET  /api/settings — get settings</li>
+                    <li>PUT  /api/settings — update settings</li>
+                    <li>WS   /ws/ssh/{id} — SSH terminal</li>
+                </ul>
+            </div>
+        </div>
+    `;
+    document.getElementById('instructionsModal').style.display = 'flex';
+}
+
 // SSH Terminal
 function openSSH(id, name) {
     const modal = document.getElementById('sshModal');
-    document.getElementById('ssh-title').textContent = `SSH — ${name}`;
+    document.getElementById('ssh-title').textContent = `${t('sshTerminal')} — ${name}`;
     modal.style.display = 'flex';
 
     const container = document.getElementById('terminal-container');
     container.innerHTML = '';
 
     if (typeof Terminal === 'undefined') {
-        container.innerHTML = '<div style="padding:20px;color:#f87171">xterm.js не загружен</div>';
+        container.innerHTML = '<div style="padding:20px;color:var(--danger)">xterm.js not loaded</div>';
         return;
     }
 
@@ -205,22 +277,22 @@ function closeSSH() {
 
 // Server actions
 async function rebootServer(id) {
-    if (!confirm('Перезагрузить сервер?')) return;
+    if (!confirm(t('rebootConfirm'))) return;
     try {
         await fetch(`/api/servers/${id}/reboot`, {method: 'POST', credentials: 'include'});
-        alert('Команда перезагрузки отправлена');
+        alert(t('rebootSent'));
     } catch (e) {
-        alert('Ошибка: ' + e.message);
+        alert('Error: ' + e.message);
     }
 }
 
 async function deleteServer(id) {
-    if (!confirm('Удалить сервер из мониторинга?')) return;
+    if (!confirm(t('deleteConfirm'))) return;
     try {
         await fetch(`/api/servers/${id}`, {method: 'DELETE', credentials: 'include'});
         loadServers();
     } catch (e) {
-        alert('Ошибка: ' + e.message);
+        alert('Error: ' + e.message);
     }
 }
 
@@ -254,10 +326,10 @@ document.getElementById('addServerForm')?.addEventListener('submit', async (e) =
             loadServers();
         } else {
             const err = await resp.json();
-            alert(err.detail || 'Ошибка');
+            alert(err.detail || 'Error');
         }
     } catch (e) {
-        alert('Ошибка: ' + e.message);
+        alert('Error: ' + e.message);
     }
 });
 
@@ -301,9 +373,9 @@ document.getElementById('settingsForm')?.addEventListener('submit', async (e) =>
             body: JSON.stringify(data),
         });
         closeModal('settingsModal');
-        alert('Настройки сохранены');
+        alert(t('settingsSaved'));
     } catch (e) {
-        alert('Ошибка: ' + e.message);
+        alert('Error: ' + e.message);
     }
 });
 
@@ -322,18 +394,21 @@ async function logout() {
 }
 
 // Click outside modal to close
-document.querySelectorAll('.modal').forEach(modal => {
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-            if (modal.id === 'sshModal') {
-                closeSSH();
-            } else {
-                modal.style.display = 'none';
-            }
+document.addEventListener('click', (e) => {
+    if (e.target.classList.contains('modal')) {
+        if (e.target.id === 'sshModal') {
+            closeSSH();
+        } else {
+            e.target.style.display = 'none';
         }
-    });
+    }
 });
 
 // Initial load
-loadServers();
+document.addEventListener('DOMContentLoaded', () => {
+    applyTheme(currentTheme);
+    renderPage();
+    loadServers();
+});
+
 setInterval(loadServers, 30000);
