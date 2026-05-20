@@ -2,254 +2,543 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>VPS Monitor</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: var(--tg-theme-bg-color, #1a1a2e);
-            color: var(--tg-theme-text-color, #eee);
-            padding: 16px;
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+            background: var(--tg-theme-bg-color, #0f172a);
+            color: var(--tg-theme-text-color, #e2e8f0);
             min-height: 100vh;
+            padding: 0 0 24px 0;
+            -webkit-font-smoothing: antialiased;
         }
-        .header {
-            text-align: center;
-            margin-bottom: 20px;
-            padding: 16px;
-            background: var(--tg-theme-secondary-bg-color, #16213e);
-            border-radius: 12px;
-        }
-        .header h1 { font-size: 20px; margin-bottom: 4px; }
-        .header .subtitle { opacity: 0.7; font-size: 13px; }
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 8px;
-            margin-bottom: 20px;
-        }
-        .stat-card {
-            background: var(--tg-theme-secondary-bg-color, #16213e);
-            border-radius: 10px;
-            padding: 12px;
+
+        /* Header */
+        .app-header {
+            padding: 20px 16px 16px;
             text-align: center;
         }
-        .stat-card .value { font-size: 24px; font-weight: bold; }
-        .stat-card .label { font-size: 11px; opacity: 0.7; margin-top: 4px; }
-        .stat-card.online .value { color: #4ade80; }
-        .stat-card.offline .value { color: #f87171; }
-        .server-list { list-style: none; }
-        .server-item {
-            background: var(--tg-theme-secondary-bg-color, #16213e);
-            border-radius: 12px;
-            padding: 14px 16px;
-            margin-bottom: 10px;
+        .app-header h1 {
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: -0.3px;
+        }
+        .app-header .stats-row {
+            display: flex;
+            justify-content: center;
+            gap: 16px;
+            margin-top: 12px;
+        }
+        .stat-pill {
             display: flex;
             align-items: center;
-            justify-content: space-between;
-            cursor: pointer;
-            transition: transform 0.1s;
+            gap: 6px;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            background: var(--tg-theme-secondary-bg-color, #1e293b);
         }
-        .server-item:active { transform: scale(0.98); }
-        .server-info { flex: 1; }
-        .server-name { font-weight: 600; font-size: 15px; }
-        .server-host { font-size: 12px; opacity: 0.6; margin-top: 2px; }
-        .server-metrics {
-            display: flex;
-            gap: 8px;
-            margin-top: 8px;
+        .stat-pill .dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
         }
-        .metric-badge {
+        .stat-pill .dot.green { background: #22c55e; box-shadow: 0 0 6px #22c55e; }
+        .stat-pill .dot.red { background: #ef4444; box-shadow: 0 0 6px #ef4444; }
+        .stat-pill .dot.gray { background: #64748b; }
+
+        /* Sections */
+        .section {
+            padding: 0 16px;
+            margin-bottom: 8px;
+        }
+        .section-title {
             font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            color: var(--tg-theme-hint-color, #64748b);
+            padding: 16px 4px 8px;
+        }
+
+        /* Cards */
+        .card {
+            display: flex;
+            align-items: center;
+            background: var(--tg-theme-secondary-bg-color, #1e293b);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 14px;
+            padding: 14px 16px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: transform 0.1s, opacity 0.1s;
+            position: relative;
+            overflow: hidden;
+        }
+        .card:active {
+            transform: scale(0.98);
+            opacity: 0.85;
+        }
+
+        .card-icon {
+            width: 42px;
+            height: 42px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            flex-shrink: 0;
+            margin-right: 14px;
+        }
+        .card-icon.green { background: rgba(34, 197, 94, 0.15); }
+        .card-icon.red { background: rgba(239, 68, 68, 0.15); }
+        .card-icon.blue { background: rgba(59, 130, 246, 0.15); }
+        .card-icon.yellow { background: rgba(245, 158, 11, 0.15); }
+        .card-icon.purple { background: rgba(168, 85, 247, 0.15); }
+        .card-icon.cyan { background: rgba(34, 211, 238, 0.15); }
+
+        .card-body { flex: 1; min-width: 0; }
+        .card-title {
+            font-size: 15px;
+            font-weight: 600;
+            line-height: 1.3;
+        }
+        .card-sub {
+            font-size: 12px;
+            color: var(--tg-theme-hint-color, #64748b);
+            margin-top: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .card-badge {
             padding: 3px 8px;
             border-radius: 6px;
-            background: rgba(255,255,255,0.1);
+            font-size: 11px;
+            font-weight: 600;
+            margin-right: 10px;
+            flex-shrink: 0;
         }
-        .metric-badge.warn { background: rgba(251, 191, 36, 0.2); color: #fbbf24; }
-        .metric-badge.crit { background: rgba(248, 113, 113, 0.2); color: #f87171; }
-        .status-dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            margin-left: 12px;
+        .card-badge.online { background: rgba(34,197,94,0.15); color: #22c55e; }
+        .card-badge.offline { background: rgba(239,68,68,0.15); color: #ef4444; }
+        .card-badge.warn { background: rgba(245,158,11,0.15); color: #f59e0b; }
+        .card-badge.num {
+            background: rgba(99,102,241,0.15);
+            color: #818cf8;
+            font-size: 13px;
+            font-weight: 700;
+            padding: 4px 10px;
+            border-radius: 8px;
+            min-width: 32px;
+            text-align: center;
         }
-        .status-dot.online { background: #4ade80; box-shadow: 0 0 6px #4ade80; }
-        .status-dot.offline { background: #f87171; box-shadow: 0 0 6px #f87171; }
+
+        .card-chevron {
+            color: var(--tg-theme-hint-color, #475569);
+            font-size: 18px;
+            margin-left: 8px;
+            flex-shrink: 0;
+        }
+
+        /* Server detail (expandable) */
         .server-detail {
-            display: none;
-            background: var(--tg-theme-secondary-bg-color, #16213e);
-            border-radius: 12px;
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+            background: var(--tg-theme-secondary-bg-color, #1e293b);
+            border-radius: 0 0 14px 14px;
+            margin-top: -22px;
+            margin-bottom: 8px;
+            border: 1px solid rgba(255,255,255,0.06);
+            border-top: none;
+        }
+        .server-detail.open {
+            max-height: 400px;
+        }
+        .server-detail-inner {
             padding: 16px;
-            margin-bottom: 10px;
         }
-        .server-detail.active { display: block; }
-        .detail-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 8px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
+        .detail-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
         }
-        .detail-row:last-child { border: none; }
-        .detail-label { opacity: 0.7; font-size: 13px; }
-        .detail-value { font-weight: 500; font-size: 13px; }
-        .action-buttons {
+        .detail-cell {
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
+            padding: 10px;
+        }
+        .detail-cell .label {
+            font-size: 11px;
+            color: var(--tg-theme-hint-color, #64748b);
+        }
+        .detail-cell .val {
+            font-size: 16px;
+            font-weight: 700;
+            margin-top: 2px;
+        }
+        .detail-cell .val.ok { color: #22c55e; }
+        .detail-cell .val.warn { color: #f59e0b; }
+        .detail-cell .val.crit { color: #ef4444; }
+
+        .detail-actions {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 8px;
             margin-top: 12px;
         }
-        .action-btn {
+        .detail-btn {
             padding: 10px;
             border: none;
             border-radius: 8px;
             font-size: 13px;
+            font-weight: 600;
             cursor: pointer;
-            background: var(--tg-theme-button-color, #0a84ff);
-            color: var(--tg-theme-button-text-color, #fff);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            transition: opacity 0.1s;
+            color: #fff;
         }
-        .action-btn.danger { background: #dc2626; }
-        .loading { text-align: center; padding: 40px; opacity: 0.5; }
-        .refresh-btn {
-            display: block;
-            width: 100%;
-            padding: 14px;
-            margin-top: 16px;
-            border: none;
+        .detail-btn:active { opacity: 0.7; }
+        .detail-btn.primary { background: #3b82f6; }
+        .detail-btn.danger { background: #ef4444; }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            background: var(--tg-theme-secondary-bg-color, #1e293b);
+            border: 1px solid rgba(255,255,255,0.1);
+            padding: 12px 24px;
             border-radius: 12px;
-            font-size: 15px;
-            cursor: pointer;
-            background: var(--tg-theme-button-color, #0a84ff);
-            color: var(--tg-theme-button-text-color, #fff);
+            font-size: 14px;
+            font-weight: 500;
+            opacity: 0;
+            transition: all 0.3s;
+            z-index: 100;
+            pointer-events: none;
         }
+        .toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        /* Loading */
+        .loading-screen {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 60vh;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .spinner {
+            width: 32px; height: 32px;
+            border: 3px solid rgba(255,255,255,0.1);
+            border-top-color: #6366f1;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>🖥 VPS Monitor</h1>
-        <div class="subtitle">Мониторинг серверов</div>
-    </div>
-
-    <div class="stats">
-        <div class="stat-card">
-            <div class="value" id="total">-</div>
-            <div class="label">Всего</div>
-        </div>
-        <div class="stat-card online">
-            <div class="value" id="online">-</div>
-            <div class="label">Online</div>
-        </div>
-        <div class="stat-card offline">
-            <div class="value" id="offline">-</div>
-            <div class="label">Offline</div>
+    <div id="app">
+        <div class="loading-screen" id="loadingScreen">
+            <div class="spinner"></div>
+            <span style="opacity:0.5;font-size:13px">Загрузка...</span>
         </div>
     </div>
 
-    <ul class="server-list" id="serverList">
-        <li class="loading">Загрузка...</li>
-    </ul>
-
-    <button class="refresh-btn" onclick="loadServers()">🔄 Обновить</button>
+    <div class="toast" id="toast"></div>
 
     <script>
         const tg = window.Telegram?.WebApp;
-        if (tg) {
-            tg.ready();
-            tg.expand();
+        if (tg) { tg.ready(); tg.expand(); }
+
+        let data = null;
+        let openServerId = null;
+
+        // Toast
+        function showToast(text) {
+            const el = document.getElementById('toast');
+            el.textContent = text;
+            el.classList.add('show');
+            setTimeout(() => el.classList.remove('show'), 2500);
         }
 
-        let servers = [];
+        // Fetch with auth
+        async function api(url, opts = {}) {
+            const resp = await fetch(url, {credentials: 'include', ...opts});
+            return resp.json();
+        }
 
-        async function loadServers() {
+        // Load all data
+        async function loadData() {
             try {
-                const resp = await fetch('/api/servers', {credentials: 'include'});
-                if (resp.status === 401) {
-                    document.getElementById('serverList').innerHTML =
-                        '<li class="loading">Требуется авторизация в панели</li>';
-                    return;
-                }
-                servers = await resp.json();
-                renderServers();
+                data = await api('/api/overview');
+                render();
             } catch (e) {
-                document.getElementById('serverList').innerHTML =
-                    '<li class="loading">Ошибка загрузки</li>';
+                document.getElementById('app').innerHTML = `
+                    <div class="loading-screen">
+                        <span style="font-size:32px">🔒</span>
+                        <span style="opacity:0.5;font-size:13px">Авторизуйтесь в веб-панели</span>
+                    </div>`;
             }
         }
 
-        function renderServers() {
-            const list = document.getElementById('serverList');
-            const online = servers.filter(s => s.metrics?.online).length;
-            const offline = servers.length - online;
+        function render() {
+            if (!data) return;
 
-            document.getElementById('total').textContent = servers.length;
-            document.getElementById('online').textContent = online;
-            document.getElementById('offline').textContent = offline;
+            const app = document.getElementById('app');
+            let html = '';
 
-            if (!servers.length) {
-                list.innerHTML = '<li class="loading">Нет серверов</li>';
-                return;
-            }
-
-            list.innerHTML = servers.map((srv, i) => {
-                const m = srv.metrics || {};
-                const isOnline = m.online;
-                const cpu = m.cpu_percent || 0;
-                const ram = m.ram_percent || 0;
-                const disk = m.disk_percent || 0;
-
-                const cpuClass = cpu > 90 ? 'crit' : cpu > 70 ? 'warn' : '';
-                const ramClass = ram > 90 ? 'crit' : ram > 70 ? 'warn' : '';
-                const diskClass = disk > 90 ? 'crit' : disk > 70 ? 'warn' : '';
-
-                return `
-                    <li class="server-item" onclick="toggleDetail(${i})">
-                        <div class="server-info">
-                            <div class="server-name">${srv.name}</div>
-                            <div class="server-host">${srv.host}</div>
-                            ${isOnline ? `
-                            <div class="server-metrics">
-                                <span class="metric-badge ${cpuClass}">CPU ${cpu}%</span>
-                                <span class="metric-badge ${ramClass}">RAM ${ram}%</span>
-                                <span class="metric-badge ${diskClass}">Disk ${disk}%</span>
-                            </div>` : ''}
+            // Header
+            html += `
+                <div class="app-header">
+                    <h1>🖥 VPS Monitor</h1>
+                    <div class="stats-row">
+                        <div class="stat-pill">
+                            <span class="dot green"></span>
+                            ${data.online} online
                         </div>
-                        <div class="status-dot ${isOnline ? 'online' : 'offline'}"></div>
-                    </li>
-                    <div class="server-detail" id="detail-${i}">
-                        <div class="detail-row"><span class="detail-label">Uptime</span><span class="detail-value">${m.uptime || 'N/A'}</span></div>
-                        <div class="detail-row"><span class="detail-label">Load</span><span class="detail-value">${m.load_average || 'N/A'}</span></div>
-                        <div class="detail-row"><span class="detail-label">RAM</span><span class="detail-value">${(m.ram_used_mb||0).toFixed(0)} / ${(m.ram_total_mb||0).toFixed(0)} MB</span></div>
-                        <div class="detail-row"><span class="detail-label">Disk</span><span class="detail-value">${(m.disk_used_gb||0).toFixed(1)} / ${(m.disk_total_gb||0).toFixed(1)} GB</span></div>
-                        <div class="detail-row"><span class="detail-label">Network In</span><span class="detail-value">${(m.network_in_mb||0).toFixed(0)} MB</span></div>
-                        <div class="detail-row"><span class="detail-label">Network Out</span><span class="detail-value">${(m.network_out_mb||0).toFixed(0)} MB</span></div>
-                        <div class="action-buttons">
-                            <button class="action-btn" onclick="event.stopPropagation(); rebootServer('${srv.id || srv.host}')">🔄 Reboot</button>
-                            <button class="action-btn danger" onclick="event.stopPropagation(); deleteServer('${srv.id || srv.host}')">🗑 Удалить</button>
+                        <div class="stat-pill">
+                            <span class="dot ${data.offline > 0 ? 'red' : 'gray'}"></span>
+                            ${data.offline} offline
+                        </div>
+                        <div class="stat-pill">
+                            <span class="dot gray"></span>
+                            ${data.total} всего
                         </div>
                     </div>
-                `;
-            }).join('');
+                </div>`;
+
+            // Servers section
+            html += `<div class="section">
+                <div class="section-title">СЕРВЕРЫ</div>`;
+
+            data.servers.forEach((srv, idx) => {
+                const cpuClass = srv.cpu > 90 ? 'crit' : srv.cpu > 70 ? 'warn' : 'ok';
+                const ramClass = srv.ram > 90 ? 'crit' : srv.ram > 70 ? 'warn' : 'ok';
+                const diskClass = srv.disk > 90 ? 'crit' : srv.disk > 70 ? 'warn' : 'ok';
+                const isOpen = openServerId === srv.id;
+
+                html += `
+                    <div class="card" onclick="toggleServer('${srv.id}')" style="${isOpen ? 'border-radius:14px 14px 0 0;margin-bottom:0' : ''}">
+                        <div class="card-icon ${srv.online ? 'green' : 'red'}">
+                            ${srv.online ? '🟢' : '🔴'}
+                        </div>
+                        <div class="card-body">
+                            <div class="card-title">${srv.name}</div>
+                            <div class="card-sub">${srv.host}${srv.online ? ' • CPU ' + srv.cpu + '% • RAM ' + srv.ram + '%' : ' • Недоступен'}</div>
+                        </div>
+                        <span class="card-badge ${srv.online ? 'online' : 'offline'}">${srv.online ? 'ON' : 'OFF'}</span>
+                        <span class="card-chevron">${isOpen ? '▾' : '›'}</span>
+                    </div>
+                    <div class="server-detail ${isOpen ? 'open' : ''}" id="detail-${srv.id}">
+                        <div class="server-detail-inner">
+                            <div class="detail-grid">
+                                <div class="detail-cell">
+                                    <div class="label">CPU</div>
+                                    <div class="val ${cpuClass}">${srv.cpu}%</div>
+                                </div>
+                                <div class="detail-cell">
+                                    <div class="label">RAM</div>
+                                    <div class="val ${ramClass}">${srv.ram}%</div>
+                                </div>
+                                <div class="detail-cell">
+                                    <div class="label">Disk</div>
+                                    <div class="val ${diskClass}">${srv.disk}%</div>
+                                </div>
+                                <div class="detail-cell">
+                                    <div class="label">Load</div>
+                                    <div class="val">${srv.load || '—'}</div>
+                                </div>
+                            </div>
+                            <div style="margin-top:8px;font-size:12px;color:var(--tg-theme-hint-color,#64748b)">
+                                ${srv.uptime || 'Uptime: N/A'}
+                            </div>
+                            <div class="detail-actions">
+                                <button class="detail-btn primary" onclick="event.stopPropagation();rebootServer('${srv.id}','${srv.name}')">🔄 Reboot</button>
+                                <button class="detail-btn danger" onclick="event.stopPropagation();deleteServer('${srv.id}','${srv.name}')">🗑 Удалить</button>
+                            </div>
+                        </div>
+                    </div>`;
+            });
+
+            if (!data.servers.length) {
+                html += `
+                    <div class="card" style="justify-content:center;cursor:default">
+                        <div class="card-body" style="text-align:center">
+                            <div class="card-title" style="opacity:0.5">Нет серверов</div>
+                            <div class="card-sub">Добавьте в веб-панели</div>
+                        </div>
+                    </div>`;
+            }
+            html += `</div>`;
+
+            // Actions section
+            html += `
+                <div class="section">
+                    <div class="section-title">ДЕЙСТВИЯ</div>
+                    <div class="card" onclick="refreshAll()">
+                        <div class="card-icon blue">🔄</div>
+                        <div class="card-body">
+                            <div class="card-title">Обновить данные</div>
+                            <div class="card-sub">Принудительный опрос серверов</div>
+                        </div>
+                        <span class="card-chevron">›</span>
+                    </div>
+                    <div class="card" onclick="checkAll()">
+                        <div class="card-icon green">✅</div>
+                        <div class="card-body">
+                            <div class="card-title">Проверка серверов</div>
+                            <div class="card-sub">${data.online}/${data.total} доступны</div>
+                        </div>
+                        <span class="card-badge ${data.offline > 0 ? 'offline' : 'online'}">${data.offline > 0 ? data.offline + ' DOWN' : 'ALL OK'}</span>
+                        <span class="card-chevron">›</span>
+                    </div>
+                </div>`;
+
+            // Notifications section
+            html += `
+                <div class="section">
+                    <div class="section-title">УВЕДОМЛЕНИЯ</div>
+                    ${data.muted ? `
+                    <div class="card" onclick="unmute()">
+                        <div class="card-icon yellow">🔔</div>
+                        <div class="card-body">
+                            <div class="card-title">Снять mute</div>
+                            <div class="card-sub">Уведомления приостановлены</div>
+                        </div>
+                        <span class="card-badge warn">MUTED</span>
+                        <span class="card-chevron">›</span>
+                    </div>
+                    ` : `
+                    <div class="card" onclick="mute(2)">
+                        <div class="card-icon red">🔕</div>
+                        <div class="card-body">
+                            <div class="card-title">Mute 2 часа</div>
+                            <div class="card-sub">CRIT в Telegram остаются</div>
+                        </div>
+                        <span class="card-chevron">›</span>
+                    </div>
+                    <div class="card" onclick="mute(8)">
+                        <div class="card-icon red">🔕</div>
+                        <div class="card-body">
+                            <div class="card-title">Mute 8 часов</div>
+                            <div class="card-sub">Ночной режим</div>
+                        </div>
+                        <span class="card-chevron">›</span>
+                    </div>
+                    `}
+                </div>`;
+
+            // System section
+            html += `
+                <div class="section">
+                    <div class="section-title">СИСТЕМА</div>
+                    <div class="card" onclick="openPanel()">
+                        <div class="card-icon cyan">🌐</div>
+                        <div class="card-body">
+                            <div class="card-title">Полная веб-панель</div>
+                            <div class="card-sub">Дашборд в браузере</div>
+                        </div>
+                        <span class="card-chevron">›</span>
+                    </div>
+                    <div class="card" style="cursor:default">
+                        <div class="card-icon purple">🔐</div>
+                        <div class="card-body">
+                            <div class="card-title">Сессия</div>
+                            <div class="card-sub">Сессия активна</div>
+                        </div>
+                        <span class="card-badge online">OK</span>
+                        <span class="card-chevron">›</span>
+                    </div>
+                    <div class="card" style="cursor:default">
+                        <div class="card-icon blue">📊</div>
+                        <div class="card-body">
+                            <div class="card-title">Мониторинг</div>
+                            <div class="card-sub">Интервал: 60 сек • Пороги: 90%</div>
+                        </div>
+                        <span class="card-badge online">ACTIVE</span>
+                        <span class="card-chevron">›</span>
+                    </div>
+                </div>`;
+
+            app.innerHTML = html;
         }
 
-        function toggleDetail(idx) {
-            const el = document.getElementById(`detail-${idx}`);
-            el.classList.toggle('active');
+        // Actions
+        function toggleServer(id) {
+            openServerId = openServerId === id ? null : id;
+            render();
         }
 
-        async function rebootServer(id) {
-            if (!confirm('Перезагрузить сервер?')) return;
-            await fetch(`/api/servers/${id}/reboot`, {method: 'POST', credentials: 'include'});
-            if (tg) tg.showAlert('Команда перезагрузки отправлена');
+        async function rebootServer(id, name) {
+            if (!confirm(`Перезагрузить ${name}?`)) return;
+            await api(`/api/servers/${id}/reboot`, {method: 'POST'});
+            showToast('🔄 Reboot отправлен');
         }
 
-        async function deleteServer(id) {
-            if (!confirm('Удалить сервер из мониторинга?')) return;
-            await fetch(`/api/servers/${id}`, {method: 'DELETE', credentials: 'include'});
-            loadServers();
+        async function deleteServer(id, name) {
+            if (!confirm(`Удалить ${name}?`)) return;
+            await api(`/api/servers/${id}`, {method: 'DELETE'});
+            showToast('🗑 Сервер удалён');
+            loadData();
         }
 
-        loadServers();
-        setInterval(loadServers, 30000);
+        async function refreshAll() {
+            showToast('🔄 Обновление...');
+            await loadData();
+            showToast('✅ Данные обновлены');
+        }
+
+        function checkAll() {
+            if (data.offline > 0) {
+                const names = data.servers.filter(s => !s.online).map(s => s.name).join(', ');
+                if (tg) tg.showAlert(`⚠️ Offline: ${names}`);
+                else alert(`Offline: ${names}`);
+            } else {
+                showToast('✅ Все серверы доступны');
+            }
+        }
+
+        async function mute(hours) {
+            await api('/api/mute', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({hours})
+            });
+            showToast(`🔕 Mute ${hours}ч`);
+            loadData();
+        }
+
+        async function unmute() {
+            await api('/api/unmute', {method: 'POST'});
+            showToast('🔔 Уведомления включены');
+            loadData();
+        }
+
+        function openPanel() {
+            const url = `${location.protocol}//${location.host}/`;
+            if (tg) tg.openLink(url);
+            else window.open(url, '_blank');
+        }
+
+        // Init
+        loadData();
+        setInterval(loadData, 30000);
     </script>
 </body>
 </html>

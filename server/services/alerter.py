@@ -13,6 +13,11 @@ previous_states: Dict[str, bool] = {}
 async def check_alerts():
     """Check metrics against thresholds and send alerts."""
     from server.services.telegram_bot import send_alert
+    from server.api.auth_routes import mute_until
+
+    # Check mute
+    if mute_until and datetime.now() < mute_until:
+        return
 
     settings = load_settings()
     servers = load_servers()
