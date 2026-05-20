@@ -234,6 +234,15 @@ function openSSH(id, name) {
     });
 
     term.open(container);
+
+    // Fit addon
+    if (typeof FitAddon !== 'undefined') {
+        const fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+        setTimeout(() => fitAddon.fit(), 100);
+        window.addEventListener('resize', () => fitAddon.fit());
+    }
+
     currentTerminal = term;
 
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';

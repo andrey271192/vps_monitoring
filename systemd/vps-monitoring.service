@@ -8,7 +8,7 @@ User=root
 WorkingDirectory=/opt/vps-monitoring
 Environment=TELEGRAM_BOT_TOKEN=8815672362:AAFGwxrWjSsjGuc9iBpX0aupKRoKkviS2NA
 Environment=TELEGRAM_CHAT_ID=371010834
-ExecStart=/opt/vps-monitoring/venv/bin/uvicorn server.main:app --host 0.0.0.0 --port 8000
+ExecStart=/opt/vps-monitoring/venv/bin/uvicorn server.main:app --host 0.0.0.0 --port 7272
 Restart=always
 RestartSec=5
 

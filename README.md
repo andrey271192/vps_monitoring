@@ -18,6 +18,11 @@
 curl -sSL https://raw.githubusercontent.com/andrey271192/vps_monitoring/main/install.sh | bash
 ```
 
+Кастомный порт:
+```bash
+curl -sSL https://raw.githubusercontent.com/andrey271192/vps_monitoring/main/install.sh | bash -s -- --port 9090
+```
+
 ### Требования
 - Ubuntu 20.04+ / Debian 11+
 - Python 3.10+
@@ -25,7 +30,7 @@ curl -sSL https://raw.githubusercontent.com/andrey271192/vps_monitoring/main/ins
 
 ## После установки
 
-- **Панель:** `http://YOUR_IP:8000`
+- **Панель:** `http://YOUR_IP:7272`
 - **Логин:** `admin` / `admin`
 - **Telegram:** бот запускается автоматически
 

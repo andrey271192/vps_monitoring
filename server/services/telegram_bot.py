@@ -42,7 +42,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
 
     keyboard.append([
-        InlineKeyboardButton("🌐 Открыть панель", url=f"http://{_get_host()}:8000")
+        InlineKeyboardButton("🌐 Открыть панель", url=f"http://{_get_host()}:7272")
     ])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
