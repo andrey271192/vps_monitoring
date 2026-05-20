@@ -40,11 +40,28 @@
             </div>
         </div>
 
-        <div class="toolbar">
-            <button class="btn-primary" id="addServerBtn" onclick="showAddServer()">+ Добавить сервер</button>
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab active" id="tab-servers" onclick="switchTab('servers')">🖥 Серверы</button>
+            <button class="tab" id="tab-pc" onclick="switchTab('pc')">💻 ПК</button>
         </div>
 
-        <div class="servers-grid" id="servers-grid"></div>
+        <!-- Servers Tab -->
+        <div id="panel-servers">
+            <div class="toolbar">
+                <button class="btn-primary" id="addServerBtn" onclick="showAddServer()">+ Добавить сервер</button>
+            </div>
+            <div class="servers-grid" id="servers-grid"></div>
+        </div>
+
+        <!-- PC Tab -->
+        <div id="panel-pc" style="display:none">
+            <div class="toolbar">
+                <button class="btn-secondary" onclick="showPCSetup()">📋 Инструкция установки</button>
+                <button class="btn-secondary" onclick="loadPCs()">🔄 Обновить</button>
+            </div>
+            <div class="servers-grid" id="pc-grid"></div>
+        </div>
     </main>
 
     <!-- Add Server Modal -->
@@ -162,6 +179,46 @@
                 <button class="btn-close" onclick="closeModal('serverDetailModal')">&times;</button>
             </div>
             <div id="detail-content"></div>
+        </div>
+    </div>
+
+    <!-- PC Setup Modal -->
+    <div class="modal" id="pcSetupModal" style="display:none">
+        <div class="modal-content modal-wide">
+            <div class="modal-header">
+                <h2>💻 Установка агента на ПК</h2>
+                <button class="btn-close" onclick="closeModal('pcSetupModal')">&times;</button>
+            </div>
+            <div class="instructions-section">
+                <div class="instr-card">
+                    <h4>📥 Быстрая установка (PowerShell от Администратора)</h4>
+                    <code id="pc-install-cmd">powershell -ExecutionPolicy Bypass -Command "Invoke-WebRequest -Uri 'http://77.239.126.123:7272/static/downloads/install_agent.ps1' -OutFile install_agent.ps1; .\install_agent.ps1 -ServerUrl 'http://77.239.126.123:7272' -AgentName 'MyPC'"</code>
+                </div>
+                <div class="instr-card">
+                    <h4>⚙️ Параметры</h4>
+                    <p><b>-ServerUrl</b> — адрес сервера мониторинга<br>
+                    <b>-AgentName</b> — имя ПК (по умолчанию hostname)<br>
+                    <b>-Interval</b> — интервал отправки в секундах (по умолчанию 60)</p>
+                </div>
+                <div class="instr-card">
+                    <h4>📊 Что мониторится</h4>
+                    <p>CPU, RAM, Disk (все диски), Network, GPU, Uptime, Top 5 процессов</p>
+                </div>
+                <div class="instr-card">
+                    <h4>🔧 Управление</h4>
+                    <ul class="cmd-list">
+                        <li>Get-ScheduledTask 'VPS-Monitor-Agent'</li>
+                        <li>Stop-ScheduledTask 'VPS-Monitor-Agent'</li>
+                        <li>Start-ScheduledTask 'VPS-Monitor-Agent'</li>
+                        <li>Unregister-ScheduledTask 'VPS-Monitor-Agent'</li>
+                    </ul>
+                </div>
+                <div class="instr-card">
+                    <h4>📁 Файлы</h4>
+                    <p>Агент: <code style="display:inline">C:\VPS-Monitor\vps_monitor_agent.ps1</code><br>
+                    Конфиг: <code style="display:inline">C:\VPS-Monitor\agent_config.json</code></p>
+                </div>
+            </div>
         </div>
     </div>
 

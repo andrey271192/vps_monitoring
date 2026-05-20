@@ -413,6 +413,115 @@ document.addEventListener('click', (e) => {
     }
 });
 
+// Tabs
+let activeTab = 'servers';
+
+function switchTab(tab) {
+    activeTab = tab;
+    document.getElementById('tab-servers').classList.toggle('active', tab === 'servers');
+    document.getElementById('tab-pc').classList.toggle('active', tab === 'pc');
+    document.getElementById('panel-servers').style.display = tab === 'servers' ? '' : 'none';
+    document.getElementById('panel-pc').style.display = tab === 'pc' ? '' : 'none';
+
+    if (tab === 'pc') loadPCs();
+}
+
+// PC monitoring
+let pcAgents = [];
+
+async function loadPCs() {
+    try {
+        const resp = await fetch('/api/pc/list', {credentials: 'include'});
+        if (resp.status === 401) return;
+        pcAgents = await resp.json();
+        renderPCs();
+    } catch (e) {
+        console.error('PC load error:', e);
+    }
+}
+
+function renderPCs() {
+    const grid = document.getElementById('pc-grid');
+
+    if (!pcAgents.length) {
+        grid.innerHTML = '<div style="text-align:center;padding:60px;opacity:0.5;grid-column:1/-1">Нет подключённых ПК. Установите агент.</div>';
+        return;
+    }
+
+    grid.innerHTML = pcAgents.map(pc => {
+        const m = pc.metrics || {};
+        const isOnline = pc.online;
+        const cpu = m.cpu_percent || 0;
+        const ram = m.ram_percent || 0;
+        const disk = m.disk_percent || 0;
+
+        const cpuClass = cpu > 90 ? 'crit' : cpu > 70 ? 'warn' : '';
+        const ramClass = ram > 90 ? 'crit' : ram > 70 ? 'warn' : '';
+        const diskClass = disk > 90 ? 'crit' : disk > 70 ? 'warn' : '';
+
+        const disksHtml = (m.disks || []).map(d =>
+            `<div style="font-size:11px;color:var(--text-secondary);margin-top:2px">${d.drive} ${d.used_gb}/${d.total_gb} GB (${d.percent}%)</div>`
+        ).join('');
+
+        const procsHtml = (m.top_processes || []).slice(0, 3).map(p =>
+            `<span style="font-size:10px;padding:2px 6px;background:var(--bg-primary);border-radius:4px;margin:1px">${p.name} ${p.ram_mb}MB</span>`
+        ).join(' ');
+
+        return `
+            <div class="server-card ${isOnline ? 'online' : 'offline'}">
+                <div class="server-card-header">
+                    <div>
+                        <div class="name">💻 ${pc.agent_name}</div>
+                        <div class="host">${m.hostname || ''} • ${pc.ip || ''}</div>
+                    </div>
+                    <span class="status-badge ${isOnline ? 'online' : 'offline'}">
+                        <span class="status-dot ${isOnline ? 'online' : 'offline'}"></span>
+                        ${isOnline ? 'Online' : 'Offline'}
+                    </span>
+                </div>
+                ${isOnline ? `
+                <div class="metrics-grid">
+                    <div class="metric-item">
+                        <span class="label">CPU</span>
+                        <span class="value ${cpuClass}">${cpu}%</span>
+                        <div class="progress-bar"><div class="fill ${cpuClass || 'ok'}" style="width:${cpu}%"></div></div>
+                    </div>
+                    <div class="metric-item">
+                        <span class="label">RAM</span>
+                        <span class="value ${ramClass}">${ram}%</span>
+                        <div class="progress-bar"><div class="fill ${ramClass || 'ok'}" style="width:${ram}%"></div></div>
+                    </div>
+                    <div class="metric-item">
+                        <span class="label">Disk</span>
+                        <span class="value ${diskClass}">${disk}%</span>
+                        <div class="progress-bar"><div class="fill ${diskClass || 'ok'}" style="width:${disk}%"></div></div>
+                    </div>
+                </div>
+                <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">
+                    ${m.uptime || ''} ${m.os ? '• ' + m.os.substring(0, 30) : ''}
+                </div>
+                ${m.gpu_name ? `<div style="font-size:11px;color:var(--text-secondary)">GPU: ${m.gpu_name}</div>` : ''}
+                ${disksHtml}
+                ${procsHtml ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:2px">${procsHtml}</div>` : ''}
+                ` : '<div style="padding:20px 0;text-align:center;opacity:0.5">Нет данных</div>'}
+                <div class="server-card-actions">
+                    <button class="danger" onclick="deletePC('${pc.agent_name}')">🗑 Удалить</button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+async function deletePC(name) {
+    if (!confirm(`Удалить ПК "${name}" из мониторинга?`)) return;
+    await fetch(`/api/pc/${encodeURIComponent(name)}`, {method: 'DELETE', credentials: 'include'});
+    loadPCs();
+}
+
+function showPCSetup() {
+    document.getElementById('pcSetupModal').style.display = 'flex';
+}
+
 // Initial load
 document.addEventListener('DOMContentLoaded', () => {
     applyTheme(currentTheme);
@@ -420,4 +529,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadServers();
 });
 
-setInterval(loadServers, 30000);
+setInterval(() => {
+    if (activeTab === 'servers') loadServers();
+    else loadPCs();
+}, 30000);

@@ -16,6 +16,7 @@ from server.auth import get_current_user
 from server.api.servers import router as servers_router
 from server.api.auth_routes import router as auth_router
 from server.api.ssh_ws import router as ssh_router
+from server.api.pc import router as pc_router
 from server.services.monitor import monitor_loop
 from server.services.telegram_bot import start_bot, stop_bot
 from server.services.alerter import check_alerts
@@ -62,10 +63,16 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
+# Static downloads (Windows agent)
+DOWNLOADS_DIR = os.path.join(os.path.dirname(BASE_DIR), "windows")
+if os.path.isdir(DOWNLOADS_DIR):
+    app.mount("/static/downloads", StaticFiles(directory=DOWNLOADS_DIR), name="downloads")
+
 # Include routers
 app.include_router(servers_router)
 app.include_router(auth_router)
 app.include_router(ssh_router)
+app.include_router(pc_router)
 
 
 @app.get("/", response_class=HTMLResponse)
