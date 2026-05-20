@@ -12,7 +12,7 @@ previous_states: Dict[str, bool] = {}
 
 async def check_alerts():
     """Check metrics against thresholds and send alerts."""
-    from server.services.telegram_bot import send_alert
+    from server.services.notifier import send_notification
     from server.api.auth_routes import mute_until
 
     # Check mute
@@ -38,9 +38,15 @@ async def check_alerts():
         # Online/Offline state change
         if prev_online is not None and prev_online != current_online:
             if current_online:
-                await send_alert(f"🟢 **{name}** ({host}) — снова онлайн")
+                await send_notification(
+                    f"🟢 **{name}** ({host}) — снова онлайн",
+                    subject=f"{name} Online", category="servers"
+                )
             else:
-                await send_alert(f"🔴 **{name}** ({host}) — OFFLINE!")
+                await send_notification(
+                    f"🔴 **{name}** ({host}) — OFFLINE!",
+                    subject=f"{name} OFFLINE", category="servers"
+                )
 
         previous_states[host] = current_online
 
@@ -50,12 +56,21 @@ async def check_alerts():
         # Threshold alerts
         cpu = m.get("cpu_percent", 0)
         if cpu >= cpu_threshold:
-            await send_alert(f"⚠️ **{name}** — CPU: {cpu}% (порог: {cpu_threshold}%)")
+            await send_notification(
+                f"⚠️ **{name}** — CPU: {cpu}% (порог: {cpu_threshold}%)",
+                subject=f"{name} CPU {cpu}%", category="servers"
+            )
 
         ram = m.get("ram_percent", 0)
         if ram >= ram_threshold:
-            await send_alert(f"⚠️ **{name}** — RAM: {ram}% (порог: {ram_threshold}%)")
+            await send_notification(
+                f"⚠️ **{name}** — RAM: {ram}% (порог: {ram_threshold}%)",
+                subject=f"{name} RAM {ram}%", category="servers"
+            )
 
         disk = m.get("disk_percent", 0)
         if disk >= disk_threshold:
-            await send_alert(f"⚠️ **{name}** — Disk: {disk}% (порог: {disk_threshold}%)")
+            await send_notification(
+                f"⚠️ **{name}** — Disk: {disk}% (порог: {disk_threshold}%)",
+                subject=f"{name} Disk {disk}%", category="servers"
+            )

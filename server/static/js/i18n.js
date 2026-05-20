@@ -73,6 +73,8 @@ const translations = {
         instr_api: "API endpoints",
         instr_thresholds: "Пороги алертов",
         instr_thresholds_text: "Настройки → Мониторинг. По умолчанию: CPU 90%, RAM 90%, Disk 90%",
+        tabServers: "Серверы",
+        tabPC: "ПК",
     },
     en: {
         title: "VPS Monitoring",
@@ -148,6 +150,8 @@ const translations = {
         instr_api: "API endpoints",
         instr_thresholds: "Alert thresholds",
         instr_thresholds_text: "Settings → Monitoring. Default: CPU 90%, RAM 90%, Disk 90%",
+        tabServers: "Servers",
+        tabPC: "PC",
     }
 };
 

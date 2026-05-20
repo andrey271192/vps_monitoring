@@ -17,6 +17,9 @@ from server.api.servers import router as servers_router
 from server.api.auth_routes import router as auth_router
 from server.api.ssh_ws import router as ssh_router
 from server.api.pc import router as pc_router
+from server.api.synology import router as synology_router
+from server.api.ha import router as ha_router
+from server.api.notifications import router as notifications_router
 from server.services.monitor import monitor_loop
 from server.services.telegram_bot import start_bot, stop_bot
 from server.services.alerter import check_alerts
@@ -74,6 +77,9 @@ app.include_router(servers_router)
 app.include_router(auth_router)
 app.include_router(ssh_router)
 app.include_router(pc_router)
+app.include_router(synology_router)
+app.include_router(ha_router)
+app.include_router(notifications_router)
 
 
 @app.get("/", response_class=HTMLResponse)
