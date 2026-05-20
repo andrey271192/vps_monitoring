@@ -600,6 +600,26 @@ main {
     overflow: hidden;
 }
 
+/* Footer */
+.app-footer {
+    text-align: center;
+    padding: 24px 16px 16px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    opacity: 0.5;
+}
+
+.app-footer a {
+    color: var(--text-secondary);
+    text-decoration: none;
+    transition: color 0.2s;
+}
+
+.app-footer a:hover {
+    color: var(--accent);
+    text-decoration: underline;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     main { padding: 16px; }

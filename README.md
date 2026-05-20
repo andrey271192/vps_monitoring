@@ -87,6 +87,15 @@ FastAPI (Python) → SSH (asyncssh) → Target Servers
 | `TELEGRAM_BOT_TOKEN` | Токен Telegram бота |
 | `TELEGRAM_CHAT_ID` | ID чата для алертов |
 
+## Автор
+
+**@Iot_andrey**
+
+- [GitHub](https://github.com/andrey271192)
+- [Boosty](https://boosty.to/iot_andrey)
+- [Поддержка](https://t.me/Iot_andrey)
+- Telegram: [@Iot_andrey](https://t.me/Iot_andrey)
+
 ## Лицензия
 
 MIT
