@@ -1,4 +1,9 @@
+import hashlib
+import hmac
+import json
 from datetime import datetime, timedelta
+from urllib.parse import parse_qs
+
 from jose import jwt
 from passlib.context import CryptContext
 from fastapi import Request, HTTPException
@@ -29,11 +34,54 @@ def verify_token(token: str) -> str | None:
         return None
 
 
+def verify_telegram_init_data(init_data: str) -> bool:
+    """Validate Telegram WebApp initData using bot token."""
+    settings = load_settings()
+    bot_token = settings.get("telegram_bot_token", "")
+    if not bot_token:
+        return False
+
+    try:
+        parsed = parse_qs(init_data)
+        received_hash = parsed.get("hash", [""])[0]
+        if not received_hash:
+            return False
+
+        # Build data-check-string
+        data_pairs = []
+        for key, values in parsed.items():
+            if key != "hash":
+                data_pairs.append(f"{key}={values[0]}")
+        data_pairs.sort()
+        data_check_string = "\n".join(data_pairs)
+
+        # HMAC-SHA256
+        secret_key = hmac.new(
+            b"WebAppData", bot_token.encode(), hashlib.sha256
+        ).digest()
+        calculated_hash = hmac.new(
+            secret_key, data_check_string.encode(), hashlib.sha256
+        ).hexdigest()
+
+        return calculated_hash == received_hash
+    except Exception:
+        return False
+
+
 def get_current_user(request: Request) -> str | None:
+    # 1. Cookie auth
     token = request.cookies.get("access_token")
-    if not token:
-        return None
-    return verify_token(token)
+    if token:
+        user = verify_token(token)
+        if user:
+            return user
+
+    # 2. Telegram initData auth (header)
+    tg_init = request.headers.get("X-Telegram-Init-Data")
+    if tg_init and verify_telegram_init_data(tg_init):
+        return "telegram_user"
+
+    return None
 
 
 def require_auth(request: Request):

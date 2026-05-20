@@ -277,9 +277,21 @@
             setTimeout(() => el.classList.remove('show'), 2500);
         }
 
-        // Fetch with auth
+        // Telegram initData for auth
+        const initData = tg?.initData || '';
+
+        // Fetch with auth (cookie or Telegram initData)
         async function api(url, opts = {}) {
-            const resp = await fetch(url, {credentials: 'include', ...opts});
+            const headers = opts.headers || {};
+            if (initData) {
+                headers['X-Telegram-Init-Data'] = initData;
+            }
+            const resp = await fetch(url, {
+                credentials: 'include',
+                ...opts,
+                headers
+            });
+            if (!resp.ok) throw new Error(resp.status);
             return resp.json();
         }
 
@@ -292,7 +304,8 @@
                 document.getElementById('app').innerHTML = `
                     <div class="loading-screen">
                         <span style="font-size:32px">🔒</span>
-                        <span style="opacity:0.5;font-size:13px">Авторизуйтесь в веб-панели</span>
+                        <span style="opacity:0.5;font-size:13px">Ошибка загрузки. Попробуйте /start</span>
+                        <button onclick="loadData()" style="margin-top:12px;padding:10px 24px;border:none;border-radius:8px;background:#6366f1;color:#fff;font-size:14px;cursor:pointer">🔄 Повторить</button>
                     </div>`;
             }
         }
