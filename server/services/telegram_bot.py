@@ -41,9 +41,17 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("⚙️ Управление", callback_data="manage")],
     ]
 
-    keyboard.append([
-        InlineKeyboardButton("🌐 Открыть панель", url=f"http://{_get_host()}:7272")
-    ])
+    # WebApp button (HTTPS via nip.io for valid SSL)
+    host = _get_host()
+    webapp_url = f"https://{host}.nip.io/telegram-app"
+    try:
+        keyboard.append([
+            InlineKeyboardButton("📱 Открыть панель", web_app=WebAppInfo(url=webapp_url))
+        ])
+    except Exception:
+        keyboard.append([
+            InlineKeyboardButton("🌐 Открыть панель", url=f"http://{host}:7272")
+        ])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
