@@ -385,7 +385,7 @@ async def keenetic_monitor_loop():
                         await _refresh_device(dev)
                     except Exception as e:
                         logger.error(f"Keenetic refresh {dev['name']}: {e}")
-                    await asyncio.sleep(3)
+                    await asyncio.sleep(REFRESH_ALL_GAP_SEC)
         except Exception as e:
             logger.error(f"Keenetic monitor loop error: {e}")
 
