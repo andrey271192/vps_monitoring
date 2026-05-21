@@ -20,7 +20,6 @@ bot_app: Optional[Application] = None
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    settings = load_settings()
     servers = load_servers()
     metrics = get_all_metrics()
 
@@ -28,17 +27,17 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     offline = len(servers) - online
 
     text = (
-        f"🖥 **VPS Monitoring**\n\n"
-        f"Серверов: {len(servers)}\n"
+        f"🖥 *VPS Monitoring*\n\n"
+        f"Servers: {len(servers)}\n"
         f"🟢 Online: {online}\n"
         f"🔴 Offline: {offline}\n\n"
-        f"Последнее обновление: {datetime.now().strftime('%H:%M:%S')}"
+        f"Updated: {datetime.now().strftime('%H:%M:%S')}"
     )
 
     keyboard = [
-        [InlineKeyboardButton("📊 Статус серверов", callback_data="status")],
-        [InlineKeyboardButton("🔄 Обновить", callback_data="refresh")],
-        [InlineKeyboardButton("⚙️ Управление", callback_data="manage")],
+        [InlineKeyboardButton("📊 Full Status", callback_data="fullstatus")],
+        [InlineKeyboardButton("🔄 Refresh", callback_data="refresh")],
+        [InlineKeyboardButton("⚙️ Manage", callback_data="manage")],
     ]
 
     # WebApp button (HTTPS via nip.io for valid SSL)
@@ -57,6 +56,32 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
 
 
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /status command - full status of all systems."""
+    from server.services.alerter import get_full_status
+    text = await get_full_status()
+    keyboard = [[InlineKeyboardButton("🔄 Refresh", callback_data="fullstatus")]]
+    await update.message.reply_text(
+        text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown"
+    )
+
+
+async def fullstatus_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show full status across all 4 tabs."""
+    query = update.callback_query
+    await query.answer()
+
+    from server.services.alerter import get_full_status
+    text = await get_full_status()
+    keyboard = [
+        [InlineKeyboardButton("🔄 Refresh", callback_data="fullstatus")],
+        [InlineKeyboardButton("◀️ Back", callback_data="back")],
+    ]
+    await query.edit_message_text(
+        text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown"
+    )
+
+
 async def status_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -65,10 +90,10 @@ async def status_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     metrics = get_all_metrics()
 
     if not servers:
-        await query.edit_message_text("Нет добавленных серверов")
+        await query.edit_message_text("No servers added")
         return
 
-    text = "📊 **Статус серверов:**\n\n"
+    text = "📊 *VPS Servers:*\n\n"
     for srv in servers:
         m = metrics.get(srv["host"], {})
         status = "🟢" if m.get("online") else "🔴"
@@ -76,13 +101,13 @@ async def status_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ram = m.get("ram_percent", 0)
         disk = m.get("disk_percent", 0)
         text += (
-            f"{status} **{srv['name']}** ({srv['host']})\n"
+            f"{status} *{srv['name']}* ({srv['host']})\n"
             f"   CPU: {cpu}% | RAM: {ram}% | Disk: {disk}%\n\n"
         )
 
     keyboard = [
-        [InlineKeyboardButton("🔄 Обновить", callback_data="status")],
-        [InlineKeyboardButton("◀️ Назад", callback_data="back")],
+        [InlineKeyboardButton("🔄 Refresh", callback_data="status")],
+        [InlineKeyboardButton("◀️ Back", callback_data="back")],
     ]
     await query.edit_message_text(
         text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown"
@@ -281,14 +306,20 @@ async def start_bot():
     bot_app = Application.builder().token(token).build()
 
     bot_app.add_handler(CommandHandler("start", start_command))
+    bot_app.add_handler(CommandHandler("status", status_command))
+    bot_app.add_handler(CallbackQueryHandler(fullstatus_callback, pattern="^fullstatus$"))
     bot_app.add_handler(CallbackQueryHandler(status_callback, pattern="^status$"))
     bot_app.add_handler(CallbackQueryHandler(manage_callback, pattern="^manage$"))
     bot_app.add_handler(CallbackQueryHandler(server_action_callback, pattern="^(server_|reboot_|confirm_reboot_|refresh_|refresh$|back$)"))
 
-    await bot_app.initialize()
-    await bot_app.start()
-    await bot_app.updater.start_polling(drop_pending_updates=True)
-    logger.info("Telegram bot started")
+    try:
+        await bot_app.initialize()
+        await bot_app.start()
+        await bot_app.updater.start_polling(drop_pending_updates=True)
+        logger.info("Telegram bot started")
+    except Exception as e:
+        logger.error(f"Telegram bot failed to start: {e}")
+        bot_app = None
 
 
 async def stop_bot():

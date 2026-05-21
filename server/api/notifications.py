@@ -88,6 +88,38 @@ async def test_notification(channel: str, request: Request, user: str = Depends(
     return {"status": "ok" if ok else "error", "channel": channel}
 
 
+@router.get("/muted-devices")
+async def get_muted_devices(request: Request, user: str = Depends(require_auth)):
+    """Get list of muted device keys."""
+    settings = load_settings()
+    return {"muted": settings.get("muted_devices", [])}
+
+
+@router.post("/mute-device")
+async def toggle_mute_device(request: Request, user: str = Depends(require_auth)):
+    """Toggle mute for a device. Body: {category, name}. Key format: 'servers:SGA_3'."""
+    body = await request.json()
+    category = body.get("category", "")
+    name = body.get("name", "")
+    if not category or not name:
+        return {"status": "error", "detail": "category and name required"}
+
+    key = f"{category}:{name}"
+    settings = load_settings()
+    muted = settings.get("muted_devices", [])
+
+    if key in muted:
+        muted.remove(key)
+        is_muted = False
+    else:
+        muted.append(key)
+        is_muted = True
+
+    settings["muted_devices"] = muted
+    save_settings(settings)
+    return {"status": "ok", "muted": is_muted, "key": key}
+
+
 @router.post("/generate-pc-agent")
 async def generate_pc_agent(request: Request, user: str = Depends(require_auth)):
     """Generate personalized PC agent install command."""
@@ -96,16 +128,20 @@ async def generate_pc_agent(request: Request, user: str = Depends(require_auth))
     server_url = body.get("server_url", "").strip()
 
     if not server_url:
-        # Auto-detect
-        host = request.headers.get("host", "localhost:7272")
-        proto = "http"
-        server_url = f"{proto}://{host}"
+        # Auto-detect: use IP on port 80 (HTTP, works on all Windows)
+        host = request.headers.get("host", "localhost")
+        # Strip port if present, use plain HTTP port 80
+        host_ip = host.split(":")[0]
+        server_url = f"http://{host_ip}"
 
-    cmd = (
-        f'powershell -ExecutionPolicy Bypass -Command '
-        f'"Invoke-WebRequest -Uri \'{server_url}/static/downloads/install_agent.ps1\' '
-        f'-OutFile install_agent.ps1; .\\install_agent.ps1 '
-        f'-ServerUrl \'{server_url}\' -AgentName \'{agent_name}\'"'
+    # Command for use directly inside PowerShell (Admin)
+    # Uses HTTP port 80 (nginx proxy) — no SSL issues on old PowerShell
+    ps_cmd = (
+        f"Set-ExecutionPolicy Bypass -Scope Process -Force; "
+        f"$ProgressPreference = 'SilentlyContinue'; "
+        f"(New-Object Net.WebClient).DownloadFile('{server_url}/static/downloads/install_agent.ps1', "
+        f"\"$PWD\\install_agent.ps1\"); "
+        f"& \"$PWD\\install_agent.ps1\" -ServerUrl '{server_url}' -AgentName '{agent_name}'"
     )
 
-    return {"status": "ok", "command": cmd, "agent_name": agent_name}
+    return {"status": "ok", "command": ps_cmd, "agent_name": agent_name}

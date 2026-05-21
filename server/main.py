@@ -19,6 +19,7 @@ from server.api.ssh_ws import router as ssh_router
 from server.api.pc import router as pc_router
 from server.api.synology import router as synology_router
 from server.api.ha import router as ha_router
+from server.api.keenetic import router as keenetic_router, keenetic_monitor_loop
 from server.api.notifications import router as notifications_router
 from server.services.monitor import monitor_loop
 from server.services.telegram_bot import start_bot, stop_bot
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 monitor_task = None
 alert_task = None
+keenetic_task = None
 
 
 async def alert_loop():
@@ -44,18 +46,19 @@ async def alert_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global monitor_task, alert_task
-    # Start background tasks
+    global monitor_task, alert_task, keenetic_task
     monitor_task = asyncio.create_task(monitor_loop())
     alert_task = asyncio.create_task(alert_loop())
+    keenetic_task = asyncio.create_task(keenetic_monitor_loop())
     await start_bot()
     logger.info("VPS Monitoring started")
     yield
-    # Cleanup
     if monitor_task:
         monitor_task.cancel()
     if alert_task:
         alert_task.cancel()
+    if keenetic_task:
+        keenetic_task.cancel()
     await stop_bot()
 
 
@@ -79,6 +82,7 @@ app.include_router(ssh_router)
 app.include_router(pc_router)
 app.include_router(synology_router)
 app.include_router(ha_router)
+app.include_router(keenetic_router)
 app.include_router(notifications_router)
 
 

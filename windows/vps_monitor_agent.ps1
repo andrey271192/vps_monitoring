@@ -1,4 +1,4 @@
-# VPS Monitor — Windows PC Agent
+# VPS Monitor - Windows PC Agent
 # Sends system metrics to VPS Monitoring server
 #
 # Install: Run install_agent.ps1
@@ -13,7 +13,7 @@ param(
 # Load config
 $ConfigPath = Join-Path $PSScriptRoot "agent_config.json"
 if (Test-Path $ConfigPath) {
-    $config = Get-Content $ConfigPath | ConvertFrom-Json
+    $config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
     if (-not $ServerUrl) { $ServerUrl = $config.server_url }
     if (-not $AgentName) { $AgentName = $config.agent_name }
     if ($config.interval) { $Interval = $config.interval }
@@ -26,7 +26,7 @@ if (-not $ServerUrl -or -not $AgentName) {
 }
 
 Write-Host "================================================" -ForegroundColor Cyan
-Write-Host "  VPS Monitor — PC Agent" -ForegroundColor Cyan
+Write-Host "  VPS Monitor - PC Agent" -ForegroundColor Cyan
 Write-Host "  Server: $ServerUrl" -ForegroundColor Gray
 Write-Host "  Name:   $AgentName" -ForegroundColor Gray
 Write-Host "  Interval: ${Interval}s" -ForegroundColor Gray
@@ -44,9 +44,19 @@ function Get-SystemMetrics {
     $metrics["os"] = "$($os.Caption) $($os.Version)"
 
     # CPU
-    $cpu = Get-CimInstance Win32_Processor
-    $metrics["cpu_name"] = $cpu.Name
-    $metrics["cpu_percent"] = [math]::Round((Get-Counter '\Processor(_Total)\% Processor Time' -ErrorAction SilentlyContinue).CounterSamples[0].CookedValue, 1)
+    try {
+        $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+        $metrics["cpu_name"] = $cpu.Name
+        $counter = Get-Counter '\Processor(_Total)\% Processor Time' -ErrorAction SilentlyContinue
+        if ($counter) {
+            $metrics["cpu_percent"] = [math]::Round($counter.CounterSamples[0].CookedValue, 1)
+        } else {
+            $metrics["cpu_percent"] = 0
+        }
+    } catch {
+        $metrics["cpu_percent"] = 0
+        $metrics["cpu_name"] = "Unknown"
+    }
 
     # RAM
     $totalRam = [math]::Round($os.TotalVisibleMemorySize / 1024, 0)
@@ -82,18 +92,24 @@ function Get-SystemMetrics {
     }
 
     # Network
-    $adapters = Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq "Up" }
-    $netInfo = @()
-    foreach ($a in $adapters) {
-        $stats = Get-NetAdapterStatistics -Name $a.Name -ErrorAction SilentlyContinue
-        $netInfo += @{
-            name = $a.Name
-            speed_mbps = [math]::Round($a.LinkSpeed.Replace(" Gbps","000").Replace(" Mbps","") -as [double], 0)
-            sent_mb = if ($stats) { [math]::Round($stats.SentBytes / 1MB, 0) } else { 0 }
-            received_mb = if ($stats) { [math]::Round($stats.ReceivedBytes / 1MB, 0) } else { 0 }
+    try {
+        $adapters = Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq "Up" }
+        $netInfo = @()
+        foreach ($a in $adapters) {
+            $stats = Get-NetAdapterStatistics -Name $a.Name -ErrorAction SilentlyContinue
+            $speed = 0
+            try { $speed = [math]::Round($a.LinkSpeed.Replace(" Gbps","000").Replace(" Mbps","") -as [double], 0) } catch {}
+            $netInfo += @{
+                name = $a.Name
+                speed_mbps = $speed
+                sent_mb = if ($stats) { [math]::Round($stats.SentBytes / 1MB, 0) } else { 0 }
+                received_mb = if ($stats) { [math]::Round($stats.ReceivedBytes / 1MB, 0) } else { 0 }
+            }
         }
+        $metrics["network"] = $netInfo
+    } catch {
+        $metrics["network"] = @()
     }
-    $metrics["network"] = $netInfo
 
     # Uptime
     $uptime = (Get-Date) - $os.LastBootUpTime
@@ -110,9 +126,13 @@ function Get-SystemMetrics {
     } catch {}
 
     # Top processes by CPU
-    $topProcs = Get-Process | Sort-Object CPU -Descending | Select-Object -First 5 |
-        ForEach-Object { @{ name = $_.ProcessName; cpu = [math]::Round($_.CPU, 1); ram_mb = [math]::Round($_.WorkingSet64 / 1MB, 0) } }
-    $metrics["top_processes"] = $topProcs
+    try {
+        $topProcs = Get-Process | Sort-Object CPU -Descending | Select-Object -First 5 |
+            ForEach-Object { @{ name = $_.ProcessName; cpu = [math]::Round($_.CPU, 1); ram_mb = [math]::Round($_.WorkingSet64 / 1MB, 0) } }
+        $metrics["top_processes"] = $topProcs
+    } catch {
+        $metrics["top_processes"] = @()
+    }
 
     return $metrics
 }
@@ -125,12 +145,10 @@ function Send-Metrics($metrics) {
     } | ConvertTo-Json -Depth 5
 
     try {
-        $response = Invoke-RestMethod -Uri "$ServerUrl/api/pc/heartbeat" `
-            -Method POST `
-            -Body $body `
-            -ContentType "application/json" `
-            -TimeoutSec 15
-
+        $wc = New-Object System.Net.WebClient
+        $wc.Headers.Add("Content-Type", "application/json")
+        $wc.Encoding = [System.Text.Encoding]::UTF8
+        $null = $wc.UploadString("$ServerUrl/api/pc/heartbeat", "POST", $body)
         return $true
     } catch {
         Write-Host "  [!] Send failed: $($_.Exception.Message)" -ForegroundColor Yellow
@@ -150,7 +168,7 @@ while ($true) {
         $ok = Send-Metrics $metrics
 
         if ($ok) {
-            Write-Host "[$ts] OK — CPU: $($metrics.cpu_percent)% RAM: $($metrics.ram_percent)% Disk: $($metrics.disk_percent)%" -ForegroundColor Green
+            Write-Host "[$ts] OK - CPU: $($metrics.cpu_percent)% RAM: $($metrics.ram_percent)% Disk: $($metrics.disk_percent)%" -ForegroundColor Green
         }
     } catch {
         Write-Host "[$ts] ERROR: $($_.Exception.Message)" -ForegroundColor Red

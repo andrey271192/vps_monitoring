@@ -1,6 +1,7 @@
 """Synology DSM API client for NAS monitoring."""
 
 import logging
+import traceback
 from typing import Optional, Dict, Any
 
 import aiohttp
@@ -13,16 +14,28 @@ class SynologyClient:
 
     def __init__(self, host: str, port: int = 5000, https: bool = False,
                  username: str = "", password: str = ""):
+        # Handle case where host already contains protocol
+        if host.startswith("http://") or host.startswith("https://"):
+            clean = host.replace("https://", "").replace("http://", "").rstrip("/")
+            if ":" in clean:
+                host = clean.split(":")[0]
+                port = int(clean.split(":")[1])
+            else:
+                host = clean
+            if "https" in host:
+                https = True
+
         proto = "https" if https else "http"
         self.base_url = f"{proto}://{host}:{port}"
         self.username = username
         self.password = password
         self.sid: Optional[str] = None
+        logger.info(f"SynologyClient init: base_url={self.base_url}")
 
     async def login(self) -> bool:
         """Authenticate and get session ID."""
         try:
-            url = f"{self.base_url}/webapi/auth.cgi"
+            url = f"{self.base_url}/webapi/entry.cgi"
             params = {
                 "api": "SYNO.API.Auth",
                 "version": "6",
@@ -32,17 +45,20 @@ class SynologyClient:
                 "session": "VPSMonitor",
                 "format": "sid",
             }
+            logger.info(f"Synology login attempt: {url}")
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10),
                                        ssl=False) as resp:
-                    data = await resp.json()
+                    # content_type=None — Synology may return JSON as text/plain
+                    data = await resp.json(content_type=None)
                     if data.get("success"):
                         self.sid = data["data"]["sid"]
+                        logger.info("Synology login OK")
                         return True
                     logger.error(f"Synology login failed: {data}")
                     return False
         except Exception as e:
-            logger.error(f"Synology login error: {e}")
+            logger.error(f"Synology login error: {type(e).__name__}: {e}\n{traceback.format_exc()}")
             return False
 
     async def _api_call(self, cgi: str, api: str, version: str = "1",
@@ -66,7 +82,7 @@ class SynologyClient:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=15),
                                        ssl=False) as resp:
-                    data = await resp.json()
+                    data = await resp.json(content_type=None)
                     if data.get("success"):
                         return data.get("data", {})
                     # Session expired? Re-login once
@@ -75,12 +91,13 @@ class SynologyClient:
                         if await self.login():
                             params["_sid"] = self.sid
                             async with session.get(url, params=params, ssl=False) as resp2:
-                                data2 = await resp2.json()
+                                data2 = await resp2.json(content_type=None)
                                 if data2.get("success"):
                                     return data2.get("data", {})
+                    logger.warning(f"Synology API {api} returned: {data}")
                     return None
         except Exception as e:
-            logger.error(f"Synology API error ({api}): {e}")
+            logger.error(f"Synology API error ({api}): {type(e).__name__}: {e}")
             return None
 
     async def get_system_info(self) -> Optional[dict]:
@@ -124,6 +141,7 @@ class SynologyClient:
         """Collect all metrics in one go."""
         result = {
             "online": False,
+            "error": "",
             "system": {},
             "cpu_percent": 0,
             "ram_percent": 0,
@@ -139,16 +157,29 @@ class SynologyClient:
             "dsm_version": "",
         }
 
+        # Login first to get clear error
+        if not self.sid:
+            try:
+                logged_in = await self.login()
+            except Exception as e:
+                result["error"] = f"Login error: {type(e).__name__}"
+                return result
+            if not logged_in:
+                result["error"] = "Login failed — check host/port/credentials"
+                return result
+
         # System info
         sys_info = await self.get_system_info()
         if sys_info is None:
+            result["error"] = "Failed to get system info"
             return result
 
         result["online"] = True
         result["model"] = sys_info.get("model", "")
-        result["dsm_version"] = f"DSM {sys_info.get('version_string', '')}"
+        ver_str = sys_info.get("version_string", "")
+        result["dsm_version"] = ver_str if ver_str.startswith("DSM") else f"DSM {ver_str}"
         result["temperature"] = sys_info.get("temperature", 0)
-        result["uptime"] = _format_uptime(sys_info.get("up_time", 0))
+        result["uptime"] = _format_uptime(sys_info.get("uptime", sys_info.get("up_time", 0)))
 
         # CPU / Memory
         util = await self.get_cpu_memory()
@@ -173,8 +204,8 @@ class SynologyClient:
         storage = await self.get_storage()
         if storage:
             for vol in storage.get("volumes", []):
-                total_bytes = vol.get("size", {}).get("total", 0)
-                used_bytes = vol.get("size", {}).get("used", 0)
+                total_bytes = int(vol.get("size", {}).get("total", 0) or 0)
+                used_bytes = int(vol.get("size", {}).get("used", 0) or 0)
                 total_gb = total_bytes / (1024 ** 3) if total_bytes else 0
                 used_gb = used_bytes / (1024 ** 3) if used_bytes else 0
                 percent = round(used_gb / total_gb * 100, 1) if total_gb > 0 else 0
@@ -225,7 +256,7 @@ class SynologyClient:
         """Close session."""
         if self.sid:
             try:
-                await self._api_call("auth.cgi", "SYNO.API.Auth", version="6", method="logout")
+                await self._api_call("entry.cgi", "SYNO.API.Auth", version="6", method="logout")
             except Exception:
                 pass
             self.sid = None

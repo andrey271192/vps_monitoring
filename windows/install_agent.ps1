@@ -1,5 +1,5 @@
-# VPS Monitor — Windows Agent Installer
-# Usage: powershell -ExecutionPolicy Bypass -File install_agent.ps1 -ServerUrl "http://IP:7272" -AgentName "MyPC"
+# VPS Monitor - Windows Agent Installer
+# Usage (PowerShell Admin): .\install_agent.ps1 -ServerUrl "http://IP" -AgentName "MyPC"
 
 param(
     [Parameter(Mandatory=$true)]
@@ -14,7 +14,7 @@ $InstallDir = "C:\VPS-Monitor"
 $TaskName = "VPS-Monitor-Agent"
 
 Write-Host "================================================" -ForegroundColor Cyan
-Write-Host "  VPS Monitor — Agent Installer" -ForegroundColor Cyan
+Write-Host "  VPS Monitor - Agent Installer" -ForegroundColor Cyan
 Write-Host "================================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  Server:   $ServerUrl" -ForegroundColor White
@@ -32,15 +32,17 @@ if (-not (Test-Path $InstallDir)) {
 # Download agent script
 Write-Host "[*] Downloading agent..." -ForegroundColor Yellow
 $AgentUrl = "$ServerUrl/static/downloads/vps_monitor_agent.ps1"
+$AgentDest = "$InstallDir\vps_monitor_agent.ps1"
 try {
-    Invoke-WebRequest -Uri $AgentUrl -OutFile "$InstallDir\vps_monitor_agent.ps1" -UseBasicParsing
+    $wc = New-Object System.Net.WebClient
+    $wc.Encoding = [System.Text.Encoding]::UTF8
+    $wc.DownloadFile($AgentUrl, $AgentDest)
     Write-Host "[+] Agent downloaded" -ForegroundColor Green
 } catch {
-    Write-Host "[!] Download failed, using local copy..." -ForegroundColor Yellow
-    # Fallback: copy from same directory
+    Write-Host "[!] Download failed: $($_.Exception.Message)" -ForegroundColor Yellow
     $localAgent = Join-Path $PSScriptRoot "vps_monitor_agent.ps1"
     if (Test-Path $localAgent) {
-        Copy-Item $localAgent "$InstallDir\vps_monitor_agent.ps1"
+        Copy-Item $localAgent $AgentDest
         Write-Host "[+] Local copy used" -ForegroundColor Green
     } else {
         Write-Host "[-] No agent script found!" -ForegroundColor Red
@@ -55,10 +57,10 @@ $config = @{
     interval = $Interval
 } | ConvertTo-Json
 
-Set-Content -Path "$InstallDir\agent_config.json" -Value $config
+Set-Content -Path "$InstallDir\agent_config.json" -Value $config -Encoding UTF8
 Write-Host "[+] Config saved" -ForegroundColor Green
 
-# Create scheduled task (run at startup + every 5 min check)
+# Create scheduled task
 $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($existingTask) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
@@ -71,7 +73,6 @@ $action = New-ScheduledTaskAction `
     -WorkingDirectory $InstallDir
 
 $triggerStartup = New-ScheduledTaskTrigger -AtStartup
-$triggerNow = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 1)
 
 $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
 
@@ -88,7 +89,7 @@ Register-ScheduledTask `
     -Trigger $triggerStartup `
     -Principal $principal `
     -Settings $settings `
-    -Description "VPS Monitor PC Agent — sends metrics to $ServerUrl" | Out-Null
+    -Description "VPS Monitor PC Agent" | Out-Null
 
 Write-Host "[+] Scheduled task created" -ForegroundColor Green
 
@@ -106,9 +107,9 @@ Write-Host "  Task:      $TaskName" -ForegroundColor White
 Write-Host "  Status:    Running" -ForegroundColor White
 Write-Host ""
 Write-Host "  Commands:" -ForegroundColor Gray
-Write-Host "    Check:   Get-ScheduledTask '$TaskName'" -ForegroundColor Gray
-Write-Host "    Stop:    Stop-ScheduledTask '$TaskName'" -ForegroundColor Gray
-Write-Host "    Start:   Start-ScheduledTask '$TaskName'" -ForegroundColor Gray
-Write-Host "    Remove:  Unregister-ScheduledTask '$TaskName'" -ForegroundColor Gray
-Write-Host "    Logs:    type $InstallDir\agent_config.json" -ForegroundColor Gray
+Write-Host "    Check:   Get-ScheduledTask $TaskName" -ForegroundColor Gray
+Write-Host "    Stop:    Stop-ScheduledTask $TaskName" -ForegroundColor Gray
+Write-Host "    Start:   Start-ScheduledTask $TaskName" -ForegroundColor Gray
+Write-Host "    Remove:  Unregister-ScheduledTask $TaskName" -ForegroundColor Gray
+Write-Host "    Config:  type $InstallDir\agent_config.json" -ForegroundColor Gray
 Write-Host ""

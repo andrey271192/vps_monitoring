@@ -30,7 +30,13 @@ async def send_telegram(message: str, parse_mode: str = "Markdown"):
                 "text": message,
                 "parse_mode": parse_mode,
             }) as resp:
-                return resp.status == 200
+                ok = resp.status == 200
+                if ok:
+                    logger.info(f"Telegram sent: {message[:80]}")
+                else:
+                    body = await resp.text()
+                    logger.error(f"Telegram send HTTP {resp.status}: {body[:200]}")
+                return ok
     except Exception as e:
         logger.error(f"Telegram send error: {e}")
         return False
