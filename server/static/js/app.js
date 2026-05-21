@@ -40,6 +40,28 @@ document.addEventListener('click', function(e) {
         e.stopPropagation();
         e.preventDefault();
         toggleMuteDevice(bell);
+        return;
+    }
+
+    const keenDnsBtn = e.target.closest('.keenetic-url-btn');
+    if (keenDnsBtn) {
+        e.stopPropagation();
+        e.preventDefault();
+        toggleKeeneticUrlEdit(keenDnsBtn.dataset.name);
+        return;
+    }
+
+    const keenSaveBtn = e.target.closest('.keenetic-url-save');
+    if (keenSaveBtn) {
+        e.stopPropagation();
+        e.preventDefault();
+        saveKeeneticUrl(keenSaveBtn.dataset.name);
+        return;
+    }
+
+    const keenCard = e.target.closest('.server-card[data-keen]');
+    if (keenCard && !e.target.closest('.mute-bell, .server-card-actions, .keenetic-url-edit, .keenetic-links, a, button, input, label')) {
+        showKeeneticDetail(keenCard.dataset.keen);
     }
 });
 
@@ -1230,11 +1252,11 @@ function renderKeenetic() {
         const urlValue = escHtml(keeneticWebUrl(dev));
 
         return `
-            <div class="server-card ${isOnline ? 'online' : 'offline'}" data-keen="${dev.name}" onclick="showKeeneticDetail('${dev.name}')">
+            <div class="server-card ${isOnline ? 'online' : 'offline'}" data-keen="${escHtml(dev.name)}">
                 ${bellHtml('keenetic', dev.name)}
-                <div class="server-card-header">
+                <div class="server-card-header keenetic-card-open">
                     <div>
-                        <div class="name">📡 ${dev.name}</div>
+                        <div class="name">📡 ${escHtml(dev.name)}</div>
                         <div class="host">${hostParts.join(' • ')}</div>
                     </div>
                     <span class="status-badge ${isOnline ? 'online' : 'offline'}">
@@ -1262,18 +1284,19 @@ function renderKeenetic() {
                     ${uptime ? ' • ⏱ ' + uptime : ''}
                 </div>
                 ` : `<div style="padding:20px 0;text-align:center;opacity:0.5">${error ? '⚠️ ' + error : 'Нет данных — нажмите 🔄'}</div>`}
-                <div id="${urlEditId}" class="keenetic-url-edit" style="display:none" onclick="event.stopPropagation()">
+                <div id="${urlEditId}" class="keenetic-url-edit" style="display:none">
+                    <div class="keenetic-url-edit-title">✏️ Адрес KeenDNS</div>
                     <div class="form-group" style="margin-bottom:8px">
-                        <label>Адрес KeenDNS</label>
+                        <label for="${urlEditId}-input">Адрес KeenDNS</label>
                         <input type="text" id="${urlEditId}-input" value="${urlValue}" placeholder="https://example.keenetic.pro:8443">
                     </div>
-                    <button class="btn-primary" style="width:100%" onclick="saveKeeneticUrl(${JSON.stringify(dev.name)})">Сохранить</button>
+                    <button type="button" class="btn-primary keenetic-url-save" style="width:100%" data-name="${escHtml(dev.name)}">Сохранить</button>
                 </div>
                 <div class="server-card-actions">
-                    <button onclick="event.stopPropagation();toggleKeeneticUrlEdit(${JSON.stringify(dev.name)})">✏️ KeenDNS</button>
-                    <button onclick="event.stopPropagation();refreshKeenetic('${dev.name}')">🔄 Обновить</button>
-                    <button onclick="event.stopPropagation();rebootKeenetic('${dev.name}')">🔁 Reboot</button>
-                    <button class="danger" onclick="event.stopPropagation();deleteKeenetic('${dev.name}')">🗑</button>
+                    <button type="button" class="keenetic-url-btn" data-name="${escHtml(dev.name)}">✏️ KeenDNS</button>
+                    <button type="button" onclick="event.stopPropagation();refreshKeenetic(${JSON.stringify(dev.name)})">🔄 Обновить</button>
+                    <button type="button" onclick="event.stopPropagation();rebootKeenetic(${JSON.stringify(dev.name)})">🔁 Reboot</button>
+                    <button type="button" class="danger" onclick="event.stopPropagation();deleteKeenetic(${JSON.stringify(dev.name)})">🗑</button>
                 </div>
             </div>`;
     }).join('');
@@ -1555,11 +1578,26 @@ function keeneticUrlEditId(name) {
 function toggleKeeneticUrlEdit(name) {
     const block = document.getElementById(keeneticUrlEditId(name));
     if (!block) return;
-    const show = block.style.display === 'none';
+    const show = block.style.display === 'none' || !block.classList.contains('is-open');
     block.style.display = show ? 'block' : 'none';
+    block.classList.toggle('is-open', show);
+    const card = document.querySelector(`.server-card[data-keen="${CSS.escape(name)}"]`);
+    if (card) {
+        card.querySelectorAll('.keenetic-url-edit.is-open').forEach(el => {
+            if (el !== block) {
+                el.style.display = 'none';
+                el.classList.remove('is-open');
+            }
+        });
+        card.querySelector('.keenetic-url-btn')?.classList.toggle('active', show);
+    }
     if (show) {
         const input = document.getElementById(keeneticUrlEditId(name) + '-input');
-        if (input) input.focus();
+        if (input) {
+            input.focus();
+            input.select();
+        }
+        block.scrollIntoView({block: 'nearest', behavior: 'smooth'});
     }
 }
 

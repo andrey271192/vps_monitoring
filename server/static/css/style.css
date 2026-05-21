@@ -435,12 +435,36 @@ main {
 
 .keenetic-url-edit {
     margin-top: 10px;
-    padding-top: 10px;
-    border-top: 1px solid var(--border);
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--accent) 8%, var(--card-bg));
+}
+
+.keenetic-url-edit.is-open {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.keenetic-url-edit-title {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--accent);
 }
 
 .keenetic-url-edit .form-group input {
-    font-size: 12px;
+    font-size: 13px;
+    width: 100%;
+}
+
+.server-card-actions .keenetic-url-btn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.keenetic-card-open {
+    cursor: pointer;
 }
 
 .server-card-actions {
