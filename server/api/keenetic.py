@@ -22,8 +22,11 @@ router = APIRouter(prefix="/api/keenetic", tags=["keenetic"])
 logger = logging.getLogger(__name__)
 
 keenetic_metrics: Dict[str, dict] = {}
+_refresh_all_running = False
 
 KEENETIC_FILE = DATA_DIR / "keenetic.json"
+DEVICE_REFRESH_TIMEOUT = 75
+REFRESH_ALL_GAP_SEC = 2
 
 
 def _load_keenetic():
@@ -73,8 +76,19 @@ async def _refresh_device(dev: dict) -> dict:
     client = _client_for_device(dev)
     try:
         cached = keenetic_metrics.get(name)
-        metrics = await client.collect_metrics(cached_info=cached)
-        metrics["last_updated"] = datetime.now().isoformat()
+        try:
+            metrics = await asyncio.wait_for(
+                client.collect_metrics(cached_info=cached),
+                timeout=DEVICE_REFRESH_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            metrics = {
+                "online": False,
+                "error": "Poll timeout",
+                "last_updated": datetime.now().isoformat(),
+            }
+        else:
+            metrics["last_updated"] = datetime.now().isoformat()
         keenetic_metrics[name] = metrics
         return metrics
     finally:
@@ -283,18 +297,45 @@ async def keenetic_refresh(name: str, request: Request, user: str = Depends(requ
         return {"status": "error", "detail": str(e)}
 
 
-@router.post("/refresh-all")
-async def keenetic_refresh_all(request: Request, user: str = Depends(require_auth)):
+async def _refresh_all_devices() -> list:
+    global _refresh_all_running
     devices = _load_keenetic()
     results = []
-    for dev in devices:
-        try:
-            metrics = await _refresh_device(dev)
-            results.append({"name": dev["name"], "online": metrics["online"],
-                            "error": metrics.get("error", "")})
-        except Exception as e:
-            results.append({"name": dev["name"], "online": False, "error": str(e)})
-    return {"status": "ok", "results": results}
+    try:
+        for i, dev in enumerate(devices):
+            try:
+                metrics = await _refresh_device(dev)
+                results.append({
+                    "name": dev["name"],
+                    "online": metrics["online"],
+                    "error": metrics.get("error", ""),
+                })
+            except Exception as e:
+                results.append({"name": dev["name"], "online": False, "error": str(e)})
+            if i + 1 < len(devices):
+                await asyncio.sleep(REFRESH_ALL_GAP_SEC)
+    finally:
+        _refresh_all_running = False
+    return results
+
+
+@router.post("/refresh-all")
+async def keenetic_refresh_all(request: Request, user: str = Depends(require_auth)):
+    global _refresh_all_running
+    if _refresh_all_running:
+        return {"status": "ok", "message": "refresh already running"}
+
+    devices = _load_keenetic()
+    if not devices:
+        return {"status": "ok", "results": []}
+
+    _refresh_all_running = True
+    asyncio.create_task(_refresh_all_devices())
+    return {
+        "status": "ok",
+        "message": f"refresh started for {len(devices)} routers",
+        "count": len(devices),
+    }
 
 
 @router.get("/detail/{name}")

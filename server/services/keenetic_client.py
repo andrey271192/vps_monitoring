@@ -60,7 +60,7 @@ def client_timeout_for(host: str) -> aiohttp.ClientTimeout:
     """Timeouts tuned for KeenDNS vs direct IP."""
     if is_public_ip_host(host):
         return aiohttp.ClientTimeout(total=20, connect=8, sock_read=12)
-    return aiohttp.ClientTimeout(total=45, connect=15, sock_read=30)
+    return aiohttp.ClientTimeout(total=60, connect=20, sock_read=40)
 
 
 def build_api_base_url(host: str, web_url: str = "") -> str:
@@ -214,7 +214,7 @@ class KeeneticClient:
                 )
                 await self._reset_session()
                 if attempt + 1 < AUTH_RETRIES:
-                    await asyncio.sleep(1.5 * (attempt + 1))
+                    await asyncio.sleep(2.0 * (attempt + 1))
                     continue
                 logger.error(f"Keenetic auth timeout @ {self.base_url}")
                 return False
