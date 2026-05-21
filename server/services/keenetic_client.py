@@ -27,6 +27,23 @@ def normalize_web_url(url: str) -> str:
     return url.rstrip("/")
 
 
+def parse_keenetic_web_url(url: str) -> tuple[str, str]:
+    """Validate KeenDNS/web URL; return (web_url, host) with port in host."""
+    raw = (url or "").strip()
+    if not raw:
+        raise ValueError("Укажите адрес KeenDNS")
+    if "://" in raw:
+        normalized = raw.rstrip("/")
+    else:
+        normalized = f"https://{raw}".rstrip("/")
+    parsed = urlparse(normalized)
+    if not parsed.scheme or parsed.scheme not in ("http", "https"):
+        raise ValueError("Адрес должен начинаться с http:// или https://")
+    if not parsed.netloc or not parsed.hostname:
+        raise ValueError("Некорректный формат адреса")
+    return normalized, parsed.netloc
+
+
 def is_public_ip_host(host: str) -> bool:
     """True when host is a bare IPv4 (optional :port), not KeenDNS."""
     if not host:

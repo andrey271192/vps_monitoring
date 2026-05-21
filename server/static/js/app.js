@@ -1226,6 +1226,9 @@ function renderKeenetic() {
             linksHtml += '</div>';
         }
 
+        const urlEditId = 'keen-url-' + dev.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+        const urlValue = escHtml(keeneticWebUrl(dev));
+
         return `
             <div class="server-card ${isOnline ? 'online' : 'offline'}" data-keen="${dev.name}" onclick="showKeeneticDetail('${dev.name}')">
                 ${bellHtml('keenetic', dev.name)}
@@ -1259,7 +1262,15 @@ function renderKeenetic() {
                     ${uptime ? ' • ⏱ ' + uptime : ''}
                 </div>
                 ` : `<div style="padding:20px 0;text-align:center;opacity:0.5">${error ? '⚠️ ' + error : 'Нет данных — нажмите 🔄'}</div>`}
+                <div id="${urlEditId}" class="keenetic-url-edit" style="display:none" onclick="event.stopPropagation()">
+                    <div class="form-group" style="margin-bottom:8px">
+                        <label>Адрес KeenDNS</label>
+                        <input type="text" id="${urlEditId}-input" value="${urlValue}" placeholder="https://example.keenetic.pro:8443">
+                    </div>
+                    <button class="btn-primary" style="width:100%" onclick="saveKeeneticUrl(${JSON.stringify(dev.name)})">Сохранить</button>
+                </div>
                 <div class="server-card-actions">
+                    <button onclick="event.stopPropagation();toggleKeeneticUrlEdit(${JSON.stringify(dev.name)})">✏️ KeenDNS</button>
                     <button onclick="event.stopPropagation();refreshKeenetic('${dev.name}')">🔄 Обновить</button>
                     <button onclick="event.stopPropagation();rebootKeenetic('${dev.name}')">🔁 Reboot</button>
                     <button class="danger" onclick="event.stopPropagation();deleteKeenetic('${dev.name}')">🗑</button>
@@ -1535,6 +1546,52 @@ async function rebootKeenetic(name) {
             alert(`❌ Ошибка: ${data.detail || 'unknown'}`);
         }
     } catch (e) { alert('Error: ' + e.message); }
+}
+
+function keeneticUrlEditId(name) {
+    return 'keen-url-' + name.replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+function toggleKeeneticUrlEdit(name) {
+    const block = document.getElementById(keeneticUrlEditId(name));
+    if (!block) return;
+    const show = block.style.display === 'none';
+    block.style.display = show ? 'block' : 'none';
+    if (show) {
+        const input = document.getElementById(keeneticUrlEditId(name) + '-input');
+        if (input) input.focus();
+    }
+}
+
+async function saveKeeneticUrl(name) {
+    const input = document.getElementById(keeneticUrlEditId(name) + '-input');
+    if (!input) return;
+    const web_url = input.value.trim();
+    if (!web_url) {
+        alert('Укажите адрес KeenDNS');
+        return;
+    }
+    const saveBtn = input.closest('.keenetic-url-edit')?.querySelector('.btn-primary');
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳ Сохранение...'; }
+    try {
+        const resp = await fetch(`/api/keenetic/${encodeURIComponent(name)}`, {
+            method: 'PATCH',
+            credentials: 'include',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({web_url, refresh: true}),
+        });
+        const data = await resp.json();
+        if (data.status !== 'ok') {
+            alert('❌ ' + (data.detail || 'Ошибка сохранения'));
+            return;
+        }
+        await loadKeenetic();
+        toggleKeeneticUrlEdit(name);
+    } catch (e) {
+        alert('Ошибка: ' + e.message);
+    } finally {
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Сохранить'; }
+    }
 }
 
 async function deleteKeenetic(name) {

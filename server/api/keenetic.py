@@ -14,6 +14,7 @@ from server.config import DATA_DIR, load_settings
 from server.services.keenetic_client import (
     KeeneticClient,
     normalize_web_url,
+    parse_keenetic_web_url,
     build_api_base_url,
 )
 
@@ -221,6 +222,40 @@ async def keenetic_add_bulk(request: Request, user: str = Depends(require_auth))
 
     _save_keenetic(devices)
     return {"status": "ok", "added": added, "skipped": skipped}
+
+
+@router.patch("/{name}")
+async def keenetic_update(name: str, request: Request, user: str = Depends(require_auth)):
+    """Update KeenDNS/web URL for a router (web_url + host)."""
+    body = await request.json()
+    web_url_raw = (body.get("web_url") or body.get("url") or "").strip()
+    if not web_url_raw:
+        return {"status": "error", "detail": "web_url required"}
+
+    try:
+        web_url, host = parse_keenetic_web_url(web_url_raw)
+    except ValueError as e:
+        return {"status": "error", "detail": str(e)}
+
+    devices = _load_keenetic()
+    idx = next((i for i, d in enumerate(devices) if d["name"] == name), None)
+    if idx is None:
+        return {"status": "error", "detail": "router not found"}
+
+    devices[idx]["web_url"] = web_url
+    devices[idx]["host"] = host
+    _save_keenetic(devices)
+    keenetic_metrics.pop(name, None)
+
+    result = {"status": "ok", "web_url": web_url, "host": host}
+    if body.get("refresh", True):
+        try:
+            metrics = await _refresh_device(devices[idx])
+            result["metrics"] = metrics
+        except Exception as e:
+            result["refresh_error"] = str(e)
+
+    return result
 
 
 @router.delete("/{name}")
