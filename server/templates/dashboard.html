@@ -43,10 +43,11 @@
 
         <!-- Tabs -->
         <div class="tabs">
-            <button class="tab active" id="tab-servers" onclick="switchTab('servers')">🖥 <span data-i18n="tabServers">Серверы</span></button>
-            <button class="tab" id="tab-pc" onclick="switchTab('pc')">💻 <span data-i18n="tabPC">ПК</span></button>
+            <button class="tab active" id="tab-servers" onclick="switchTab('servers')">🖥 VPS</button>
+            <button class="tab" id="tab-pc" onclick="switchTab('pc')">💻 PC</button>
             <button class="tab" id="tab-synology" onclick="switchTab('synology')">📦 Synology</button>
             <button class="tab" id="tab-ha" onclick="switchTab('ha')">🏠 Home Assistant</button>
+            <button class="tab" id="tab-keenetic" onclick="switchTab('keenetic')">📡 Keenetic</button>
         </div>
 
         <!-- Servers Tab -->
@@ -72,6 +73,7 @@
             <div class="toolbar">
                 <button class="btn-primary" onclick="showAddSynology()">+ Добавить NAS</button>
                 <button class="btn-secondary" onclick="refreshAllSynology()">🔄 Обновить все</button>
+                <button class="btn-secondary" onclick="showSynTunnel()">🔗 Туннель</button>
             </div>
             <div class="servers-grid" id="synology-grid"></div>
         </div>
@@ -83,6 +85,16 @@
                 <button class="btn-secondary" onclick="refreshAllHA()">🔄 Обновить все</button>
             </div>
             <div class="servers-grid" id="ha-grid"></div>
+        </div>
+        <!-- Keenetic Tab -->
+        <div id="panel-keenetic" style="display:none">
+            <div class="toolbar">
+                <button class="btn-primary" onclick="showAddKeenetic()">+ Добавить роутер</button>
+                <button class="btn-secondary" onclick="showBulkAddKeenetic()">📋 Массовое добавление</button>
+                <button class="btn-secondary" onclick="showImportKeenetic()">📥 Импорт таблицы</button>
+                <button class="btn-secondary" onclick="refreshAllKeenetic()">🔄 Обновить все</button>
+            </div>
+            <div class="servers-grid" id="keenetic-grid"></div>
         </div>
     </main>
 
@@ -182,6 +194,105 @@
                 </div>
                 <button type="submit" class="btn-primary">Добавить</button>
             </form>
+        </div>
+    </div>
+
+    <!-- Add Keenetic Modal -->
+    <div class="modal" id="addKeeneticModal" style="display:none">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📡 Добавить Keenetic</h2>
+                <button class="btn-close" onclick="closeModal('addKeeneticModal')">&times;</button>
+            </div>
+            <form id="addKeeneticForm">
+                <div class="form-group">
+                    <label>Название</label>
+                    <input type="text" name="name" required placeholder="Home Router">
+                </div>
+                <div class="form-group">
+                    <label>Хост / Keenetic URL</label>
+                    <input type="text" name="host" required placeholder="loftliliana.netcraze.pro или https://...">
+                </div>
+                <div class="form-group">
+                    <label>AnyDesk ID</label>
+                    <input type="text" name="anydesk" placeholder="1020687391">
+                </div>
+                <div class="form-group">
+                    <label>Логин</label>
+                    <input type="text" name="login" value="admin">
+                </div>
+                <div class="form-group">
+                    <label>Пароль</label>
+                    <input type="password" name="password" required>
+                </div>
+                <button type="submit" class="btn-primary">Добавить</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Bulk Add Keenetic Modal -->
+    <div class="modal" id="bulkAddKeeneticModal" style="display:none">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📋 Массовое добавление роутеров</h2>
+                <button class="btn-close" onclick="closeModal('bulkAddKeeneticModal')">&times;</button>
+            </div>
+            <form id="bulkAddKeeneticForm">
+                <div class="form-group">
+                    <label>Домены (по одному на строку)</label>
+                    <textarea name="domains" rows="10" required placeholder="vimpel.netcraze.link
+home.netcraze.link
+office.netcraze.link" style="width:100%;font-family:monospace;font-size:13px;resize:vertical"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Логин (общий для всех)</label>
+                    <input type="text" name="login" value="admin">
+                </div>
+                <div class="form-group">
+                    <label>Пароль (общий для всех)</label>
+                    <input type="password" name="password" required>
+                </div>
+                <button type="submit" class="btn-primary" style="width:100%">Добавить все</button>
+            </form>
+            <div id="bulkAddResult" style="display:none;margin-top:12px;padding:12px;border-radius:8px;background:var(--bg-primary);font-size:13px"></div>
+        </div>
+    </div>
+
+    <!-- Import Keenetic Modal -->
+    <div class="modal" id="importKeeneticModal" style="display:none">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📥 Импорт из таблицы</h2>
+                <button class="btn-close" onclick="closeModal('importKeeneticModal')">&times;</button>
+            </div>
+            <form id="importKeeneticForm">
+                <p style="font-size:13px;opacity:0.8;margin-bottom:12px">Вставьте строки из Excel: колонки Address, Keenetic, AnyDesk (Tab-разделитель)</p>
+                <div class="form-group">
+                    <textarea name="tsv" rows="12" required placeholder="Address	Keenetic	AnyDesk
+loftliliana	https://loftliliana.netcraze.pro	1020687391" style="width:100%;font-family:monospace;font-size:12px"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Логин (общий)</label>
+                    <input type="text" name="login" value="admin">
+                </div>
+                <div class="form-group">
+                    <label>Пароль (общий)</label>
+                    <input type="password" name="password" required>
+                </div>
+                <button type="submit" class="btn-primary" style="width:100%">Импортировать</button>
+            </form>
+            <div id="importKeeneticResult" style="display:none;margin-top:12px;padding:12px;border-radius:8px;background:var(--bg-primary);font-size:13px"></div>
+        </div>
+    </div>
+
+    <!-- Keenetic Detail Modal -->
+    <div class="modal" id="keeneticDetailModal" style="display:none">
+        <div class="modal-content modal-wide">
+            <div class="modal-header">
+                <h2 id="keeneticDetailTitle">📡 Router</h2>
+                <button class="btn-close" onclick="closeModal('keeneticDetailModal')">&times;</button>
+            </div>
+            <div id="keeneticDetailBody"></div>
         </div>
     </div>
 
@@ -415,6 +526,40 @@
         </div>
     </div>
 
+    <!-- Synology Tunnel Setup Modal -->
+    <div class="modal" id="synTunnelModal" style="display:none">
+        <div class="modal-content modal-wide">
+            <div class="modal-header">
+                <h2>🔗 Настройка туннеля для Synology</h2>
+                <button class="btn-close" onclick="closeModal('synTunnelModal')">&times;</button>
+            </div>
+            <div class="instructions-section">
+                <div class="instr-card" style="border-left:3px solid var(--accent)">
+                    <h4>⚠️ Зачем нужен туннель?</h4>
+                    <p>VPS не может напрямую подключиться к вашему Synology NAS — порт 5000 не доступен из интернета.
+                    Туннель через ПК на той же сети решает эту проблему.</p>
+                </div>
+                <div class="instr-card">
+                    <h4>📋 Шаг 1 — Запустите на ПК в той же сети (PowerShell от Администратора)</h4>
+                    <code id="syn-tunnel-cmd" style="cursor:pointer" onclick="copyToClipboard(this.textContent)" title="Нажмите чтобы скопировать">Загрузка...</code>
+                    <p style="margin-top:8px;font-size:11px;color:var(--text-secondary)">Нажмите на команду чтобы скопировать</p>
+                </div>
+                <div class="instr-card">
+                    <h4>📊 Шаг 2 — Обновите Synology на дашборде</h4>
+                    <p>После запуска туннеля нажмите "Обновить" на карточке Synology — статус должен стать ONLINE.</p>
+                </div>
+                <div class="instr-card">
+                    <h4>🔧 Управление туннелем</h4>
+                    <ul class="cmd-list">
+                        <li>Get-ScheduledTask 'VPS-Monitor-SynologyTunnel'</li>
+                        <li>Stop-ScheduledTask 'VPS-Monitor-SynologyTunnel'</li>
+                        <li>Unregister-ScheduledTask 'VPS-Monitor-SynologyTunnel'</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- PC Setup Modal -->
     <div class="modal" id="pcSetupModal" style="display:none">
         <div class="modal-content modal-wide">
@@ -425,7 +570,7 @@
             <div class="instructions-section">
                 <div class="instr-card">
                     <h4>📥 Быстрая установка (PowerShell от Администратора)</h4>
-                    <code id="pc-install-cmd">powershell -ExecutionPolicy Bypass -Command "Invoke-WebRequest -Uri 'http://77.239.126.123:7272/static/downloads/install_agent.ps1' -OutFile install_agent.ps1; .\install_agent.ps1 -ServerUrl 'http://77.239.126.123:7272' -AgentName 'MyPC'"</code>
+                    <code id="pc-install-cmd">Set-ExecutionPolicy Bypass -Scope Process -Force; $ProgressPreference = 'SilentlyContinue'; (New-Object Net.WebClient).DownloadFile('http://77.239.126.123/static/downloads/install_agent.ps1', "$PWD\install_agent.ps1"); &amp; "$PWD\install_agent.ps1" -ServerUrl 'http://77.239.126.123' -AgentName 'MyPC'</code>
                 </div>
                 <div class="instr-card">
                     <h4>⚙️ Параметры</h4>
@@ -456,6 +601,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
-    <script src="/static/js/app.js"></script>
+    <script src="/static/js/app.js?v=20260521b"></script>
 </body>
 </html>

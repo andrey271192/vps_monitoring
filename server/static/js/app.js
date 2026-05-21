@@ -1,6 +1,54 @@
 let servers = [];
 let currentTerminal = null;
 let currentWs = null;
+let mutedDevices = new Set();
+
+async function loadMutedDevices() {
+    try {
+        const resp = await fetch('/api/notifications/muted-devices', {credentials: 'include'});
+        const data = await resp.json();
+        mutedDevices = new Set(data.muted || []);
+    } catch (e) { console.error('Muted devices load error:', e); }
+}
+
+async function toggleMuteDevice(btn) {
+    const category = btn.dataset.cat;
+    const name = btn.dataset.name;
+    try {
+        const resp = await fetch('/api/notifications/mute-device', {
+            method: 'POST', credentials: 'include',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({category, name}),
+        });
+        const data = await resp.json();
+        const key = `${category}:${name}`;
+        if (data.muted) {
+            mutedDevices.add(key);
+        } else {
+            mutedDevices.delete(key);
+        }
+        btn.textContent = data.muted ? '🔕' : '🔔';
+        btn.className = 'mute-bell' + (data.muted ? ' muted' : '');
+        btn.title = data.muted ? 'Уведомления выключены' : 'Уведомления включены';
+    } catch (e) { console.error('Mute toggle error:', e); }
+}
+
+// Delegate bell clicks from document level
+document.addEventListener('click', function(e) {
+    const bell = e.target.closest('.mute-bell');
+    if (bell) {
+        e.stopPropagation();
+        e.preventDefault();
+        toggleMuteDevice(bell);
+    }
+});
+
+function bellHtml(category, name) {
+    const key = `${category}:${name}`;
+    const isMuted = mutedDevices.has(key);
+    const esc = name.replace(/"/g, '&quot;');
+    return `<button class="mute-bell${isMuted ? ' muted' : ''}" data-cat="${category}" data-name="${esc}" title="${isMuted ? 'Уведомления выключены' : 'Уведомления включены'}">${isMuted ? '🔕' : '🔔'}</button>`;
+}
 
 // i18n render
 function renderPage() {
@@ -57,6 +105,7 @@ function renderServers() {
 
         return `
             <div class="server-card ${isOnline ? 'online' : 'offline'}" onclick="showServerDetail('${id}')">
+                ${bellHtml('servers', srv.name)}
                 <div class="server-card-header">
                     <div>
                         <div class="name">${srv.name}</div>
@@ -391,7 +440,7 @@ document.addEventListener('click', (e) => {
 
 // ===================== TABS =====================
 let activeTab = 'servers';
-const allTabs = ['servers', 'pc', 'synology', 'ha'];
+const allTabs = ['servers', 'pc', 'synology', 'ha', 'keenetic'];
 
 function switchTab(tab) {
     activeTab = tab;
@@ -405,6 +454,7 @@ function switchTab(tab) {
     if (tab === 'pc') loadPCs();
     else if (tab === 'synology') loadSynology();
     else if (tab === 'ha') loadHA();
+    else if (tab === 'keenetic') loadKeenetic();
 }
 
 // ===================== PC MONITORING =====================
@@ -448,6 +498,7 @@ function renderPCs() {
 
         return `
             <div class="server-card ${isOnline ? 'online' : 'offline'}">
+                ${bellHtml('pc', pc.agent_name)}
                 <div class="server-card-header">
                     <div>
                         <div class="name">💻 ${pc.agent_name}</div>
@@ -567,10 +618,11 @@ function renderSynology() {
 
         return `
             <div class="server-card ${isOnline ? 'online' : 'offline'}" onclick="showSynologyDetail('${dev.name}')">
+                ${bellHtml('synology', dev.name)}
                 <div class="server-card-header">
                     <div>
                         <div class="name">📦 ${dev.name}</div>
-                        <div class="host">${dev.host}:${dev.port || 5000} ${m.model ? '• ' + m.model : ''}</div>
+                        <div class="host">${dev.tunnel?.enabled ? '🔗 tunnel' : dev.host + ':' + (dev.port || 5000)} ${m.model ? '• ' + m.model : ''}</div>
                     </div>
                     <span class="status-badge ${isOnline ? 'online' : 'offline'}">
                         <span class="status-dot ${isOnline ? 'online' : 'offline'}"></span>
@@ -598,9 +650,10 @@ function renderSynology() {
                 ${vmsCount ? `<div style="font-size:11px;color:var(--accent)">🖥 ${vmsCount} VM</div>` : ''}
                 ${dockerCount ? `<div style="font-size:11px;color:var(--accent)">🐳 ${dockerCount} контейнеров</div>` : ''}
                 ${volsHtml}
-                ` : '<div style="padding:20px 0;text-align:center;opacity:0.5">Нет данных — нажмите 🔄</div>'}
+                ` : `<div style="padding:20px 0;text-align:center;opacity:0.5">${m.error ? '⚠️ ' + m.error : 'Нет данных — нажмите 🔄'}</div>`}
                 <div class="server-card-actions">
                     <button onclick="event.stopPropagation(); refreshSynology('${dev.name}')">🔄 Обновить</button>
+                    ${dev.tunnel?.enabled ? `<button onclick="event.stopPropagation(); showSynTunnel()">🔗 Туннель</button>` : ''}
                     <button class="danger" onclick="event.stopPropagation(); deleteSynology('${dev.name}')">🗑</button>
                 </div>
             </div>
@@ -701,15 +754,24 @@ document.getElementById('addSynologyForm')?.addEventListener('submit', async (e)
 
 async function refreshSynology(name) {
     try {
-        await fetch(`/api/synology/refresh/${encodeURIComponent(name)}`, {method: 'POST', credentials: 'include'});
-        loadSynology();
+        const resp = await fetch(`/api/synology/refresh/${encodeURIComponent(name)}`, {method: 'POST', credentials: 'include'});
+        const data = await resp.json();
+        if (data.status === 'error' && data.detail) {
+            console.warn('Synology refresh:', data.detail);
+        }
+        // Reload list with fresh data
+        const listResp = await fetch('/api/synology/list', {credentials: 'include'});
+        synologyDevices = await listResp.json();
+        renderSynology();
     } catch (e) { alert('Error: ' + e.message); }
 }
 
 async function refreshAllSynology() {
     try {
         await fetch('/api/synology/refresh-all', {method: 'POST', credentials: 'include'});
-        loadSynology();
+        const resp = await fetch('/api/synology/list', {credentials: 'include'});
+        synologyDevices = await resp.json();
+        renderSynology();
     } catch (e) { alert('Error: ' + e.message); }
 }
 
@@ -717,6 +779,28 @@ async function deleteSynology(name) {
     if (!confirm(`Удалить Synology "${name}"?`)) return;
     await fetch(`/api/synology/${encodeURIComponent(name)}`, {method: 'DELETE', credentials: 'include'});
     loadSynology();
+}
+
+async function showSynTunnel() {
+    // Find first synology device with tunnel config
+    const dev = synologyDevices.find(d => d.tunnel?.enabled) || synologyDevices[0];
+    if (!dev) {
+        alert('Сначала добавьте Synology NAS');
+        return;
+    }
+
+    const name = dev.name;
+    try {
+        const resp = await fetch(`/api/synology/tunnel/setup-command?name=${encodeURIComponent(name)}`, {credentials: 'include'});
+        const data = await resp.json();
+        if (data.command) {
+            document.getElementById('syn-tunnel-cmd').textContent = data.command;
+        }
+    } catch (e) {
+        document.getElementById('syn-tunnel-cmd').textContent = 'Ошибка загрузки команды';
+    }
+
+    document.getElementById('synTunnelModal').style.display = 'flex';
 }
 
 // ===================== HOME ASSISTANT =====================
@@ -753,6 +837,7 @@ function renderHA() {
 
         return `
             <div class="server-card ${isOnline ? 'online' : 'offline'}" onclick="showHADetail('${inst.name}')">
+                ${bellHtml('ha', inst.name)}
                 <div class="server-card-header">
                     <div>
                         <div class="name">🏠 ${inst.name}</div>
@@ -938,14 +1023,18 @@ document.getElementById('addHAForm')?.addEventListener('submit', async (e) => {
 async function refreshHA(name) {
     try {
         await fetch(`/api/ha/refresh/${encodeURIComponent(name)}`, {method: 'POST', credentials: 'include'});
-        loadHA();
+        const resp = await fetch('/api/ha/list', {credentials: 'include'});
+        haInstances = await resp.json();
+        renderHA();
     } catch (e) { alert('Error: ' + e.message); }
 }
 
 async function refreshAllHA() {
     try {
         await fetch('/api/ha/refresh-all', {method: 'POST', credentials: 'include'});
-        loadHA();
+        const resp = await fetch('/api/ha/list', {credentials: 'include'});
+        haInstances = await resp.json();
+        renderHA();
     } catch (e) { alert('Error: ' + e.message); }
 }
 
@@ -1050,11 +1139,421 @@ async function testNotification(channel) {
     } catch (e) { alert('Error: ' + e.message); }
 }
 
+// ===================== KEENETIC MONITORING =====================
+let keeneticDevices = [];
+
+function escHtml(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function keeneticWebUrl(dev) {
+    let u = (dev.web_url || '').trim();
+    if (!u && dev.host) {
+        const h = dev.host.trim();
+        u = h.startsWith('http') ? h : (/^\d+\.\d+/.test(h) ? 'http://' : 'https://') + h;
+    }
+    if (u && !/^https?:\/\//i.test(u)) u = 'https://' + u;
+    return u.replace(/\/$/, '');
+}
+
+function openAnyDesk(id, ev) {
+    if (ev) ev.preventDefault();
+    const proto = 'anydesk://' + id;
+    window.location.href = proto;
+    setTimeout(() => {
+        if (document.hidden) return;
+        if (confirm('AnyDesk не открылся. Скачать с anydesk.com?')) {
+            window.open('https://anydesk.com/en/downloads', '_blank');
+        }
+    }, 1500);
+}
+async function loadKeenetic() {
+    try {
+        const resp = await fetch('/api/keenetic/list', {credentials: 'include'});
+        if (resp.status === 401) return;
+        keeneticDevices = await resp.json();
+        renderKeenetic();
+    } catch (e) { console.error('Keenetic load error:', e); }
+}
+
+function renderKeenetic() {
+    const grid = document.getElementById('keenetic-grid');
+    if (!keeneticDevices.length) {
+        grid.innerHTML = '<div style="text-align:center;padding:60px;opacity:0.5;grid-column:1/-1">Нет роутеров. Нажмите "+ Добавить роутер"</div>';
+        return;
+    }
+
+    grid.innerHTML = keeneticDevices.map(dev => {
+        const m = dev.metrics || {};
+        const isOnline = m.online;
+        const cpuload = m.cpuload || 0;
+        const memPct = m.mem_percent || 0;
+        const inet = m.internet;
+        const uptime = m.uptime_str || '';
+        const model = m.model || '';
+        const firmware = m.firmware || '';
+        const error = m.error || '';
+        const vpns = m.vpn || [];
+
+        const cpuClass = cpuload > 90 ? 'crit' : cpuload > 70 ? 'warn' : '';
+        const ramClass = memPct > 90 ? 'crit' : memPct > 70 ? 'warn' : '';
+
+        // VPN badges
+        let vpnHtml = '';
+        if (vpns.length) {
+            vpnHtml = `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px">` +
+                vpns.map(v => {
+                    const up = v.state === 'up';
+                    return `<span class="badge ${up ? 'badge-vpn-up' : 'badge-vpn-down'}">${v.type} ${v.description || v.name} ${up ? '🟢' : '🔴'}</span>`;
+                }).join('') + `</div>`;
+        }
+
+        const hostParts = [dev.host];
+        if (model) hostParts.push(model);
+        if (firmware) hostParts.push('v' + firmware);
+
+        const webUrl = keeneticWebUrl(dev);
+        const anydeskId = (dev.anydesk || '').replace(/\D/g, '');
+        let linksHtml = '';
+        if (webUrl || anydeskId) {
+            linksHtml = '<div class="keenetic-links" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">';
+            if (webUrl) {
+                linksHtml += `<a class="btn-secondary" style="padding:4px 10px;font-size:12px;text-decoration:none" href="${escHtml(webUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">🌐 Веб</a>`;
+            }
+            if (anydeskId) {
+                linksHtml += `<a class="btn-secondary" style="padding:4px 10px;font-size:12px;text-decoration:none;cursor:pointer" href="anydesk://${escHtml(anydeskId)}" onclick="event.stopPropagation();openAnyDesk('${escHtml(anydeskId)}',event)">🖥 AnyDesk ${escHtml(anydeskId)}</a>`;
+            }
+            linksHtml += '</div>';
+        }
+
+        return `
+            <div class="server-card ${isOnline ? 'online' : 'offline'}" data-keen="${dev.name}" onclick="showKeeneticDetail('${dev.name}')">
+                ${bellHtml('keenetic', dev.name)}
+                <div class="server-card-header">
+                    <div>
+                        <div class="name">📡 ${dev.name}</div>
+                        <div class="host">${hostParts.join(' • ')}</div>
+                    </div>
+                    <span class="status-badge ${isOnline ? 'online' : 'offline'}">
+                        <span class="status-dot ${isOnline ? 'online' : 'offline'}"></span>
+                        ${isOnline ? 'Online' : 'Offline'}
+                    </span>
+                </div>
+                ${linksHtml}
+                ${vpnHtml}
+                ${isOnline ? `
+                <div class="metrics-grid" style="grid-template-columns: repeat(2, 1fr)">
+                    <div class="metric-item">
+                        <span class="label">CPU</span>
+                        <span class="value ${cpuClass}">${cpuload}%</span>
+                        <div class="progress-bar"><div class="fill ${cpuClass || 'ok'}" style="width:${cpuload}%"></div></div>
+                    </div>
+                    <div class="metric-item">
+                        <span class="label">RAM</span>
+                        <span class="value ${ramClass}">${memPct}%</span>
+                        <div class="progress-bar"><div class="fill ${ramClass || 'ok'}" style="width:${memPct}%"></div></div>
+                    </div>
+                </div>
+                <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">
+                    ${inet ? '🌐 Internet' : '<span style="color:var(--danger)">⚠️ No Internet</span>'}
+                    ${uptime ? ' • ⏱ ' + uptime : ''}
+                </div>
+                ` : `<div style="padding:20px 0;text-align:center;opacity:0.5">${error ? '⚠️ ' + error : 'Нет данных — нажмите 🔄'}</div>`}
+                <div class="server-card-actions">
+                    <button onclick="event.stopPropagation();refreshKeenetic('${dev.name}')">🔄 Обновить</button>
+                    <button onclick="event.stopPropagation();rebootKeenetic('${dev.name}')">🔁 Reboot</button>
+                    <button class="danger" onclick="event.stopPropagation();deleteKeenetic('${dev.name}')">🗑</button>
+                </div>
+            </div>`;
+    }).join('');
+}
+
+async function showKeeneticDetail(name) {
+    const dev = keeneticDevices.find(d => d.name === name);
+    if (!dev || !dev.metrics) return;
+    const m = dev.metrics;
+
+    document.getElementById('keeneticDetailTitle').textContent = `📡 ${dev.name}`;
+
+    let html = `
+    <div class="detail-grid">
+        <div class="detail-section">
+            <h3>Система</h3>
+            <table class="detail-table">
+                <tr><td>Статус</td><td>${m.online ? '🟢 Online' : '🔴 Offline'}</td></tr>
+                <tr><td>Хост</td><td>${dev.host}</td></tr>
+                <tr><td>Hostname</td><td>${m.hostname || '-'}</td></tr>
+                <tr><td>Модель</td><td>${m.model || '-'}</td></tr>
+                <tr><td>Прошивка</td><td>${m.firmware || '-'}</td></tr>
+                <tr><td>CPU</td><td>${m.cpuload || 0}%</td></tr>
+                <tr><td>RAM</td><td>${m.mem_percent || 0}% (${formatBytes(m.memtotal - m.memfree)}/${formatBytes(m.memtotal)})</td></tr>
+                <tr><td>Uptime</td><td>${m.uptime_str || '-'}</td></tr>
+            </table>
+        </div>
+        <div class="detail-section">
+            <h3>Интернет</h3>
+            <table class="detail-table">
+                <tr><td>Internet</td><td>${m.internet ? '✅' : '❌'}</td></tr>
+                <tr><td>Gateway</td><td>${m.gateway_accessible ? '✅' : '❌'}</td></tr>
+                <tr><td>DNS</td><td>${m.dns_accessible ? '✅' : '❌'}</td></tr>
+            </table>
+        </div>
+    </div>
+    <div id="keeneticDetailExtra" style="margin-top:16px;opacity:0.5;text-align:center">⏳ Загрузка клиентов и интерфейсов...</div>`;
+
+    if (m.last_updated) {
+        html += `<div style="margin-top:12px;opacity:0.5;font-size:12px">Обновлено: ${new Date(m.last_updated).toLocaleTimeString()}</div>`;
+    }
+
+    document.getElementById('keeneticDetailBody').innerHTML = html;
+    document.getElementById('keeneticDetailModal').style.display = 'flex';
+
+    // Fetch clients + interfaces lazily
+    try {
+        const resp = await fetch(`/api/keenetic/detail/${name}`, {credentials: 'include'});
+        const data = await resp.json();
+        const extra = document.getElementById('keeneticDetailExtra');
+        if (!extra) return;
+
+        let extraHtml = '';
+
+        // Clients
+        const activeClients = (data.clients || []).filter(c => c.active);
+        if (activeClients.length) {
+            extraHtml += `<div class="detail-section">
+                <h3>Подключенные устройства (${activeClients.length})</h3>
+                <table class="detail-table">
+                    <tr><th>Имя</th><th>IP</th><th>MAC</th><th>Тип</th><th>Speed</th></tr>
+                    ${activeClients.map(c => `
+                    <tr>
+                        <td>${c.name || c.hostname || '-'}</td>
+                        <td>${c.ip}</td>
+                        <td style="font-size:11px">${c.mac}</td>
+                        <td>${c.ssid ? '📶 ' + c.ssid : '🔌 LAN'}</td>
+                        <td>${c.speed ? c.speed + ' Mbps' : '-'}</td>
+                    </tr>`).join('')}
+                </table>
+            </div>`;
+        } else {
+            extraHtml += '<div style="opacity:0.5">Нет активных клиентов</div>';
+        }
+
+        // Interfaces
+        if (data.interfaces && data.interfaces.length) {
+            extraHtml += `<div class="detail-section" style="margin-top:16px">
+                <h3>Интерфейсы</h3>
+                <table class="detail-table">
+                    <tr><th>ID</th><th>Тип</th><th>Состояние</th><th>IP</th></tr>
+                    ${data.interfaces.map(i => `
+                    <tr>
+                        <td>${i.id}</td>
+                        <td>${i.type}</td>
+                        <td>${i.state === 'up' ? '🟢' : '🔴'} ${i.state}</td>
+                        <td>${i.address || '-'}</td>
+                    </tr>`).join('')}
+                </table>
+            </div>`;
+        }
+
+        extra.innerHTML = extraHtml;
+        extra.style.opacity = '1';
+    } catch (e) {
+        const extra = document.getElementById('keeneticDetailExtra');
+        if (extra) extra.innerHTML = '<div style="color:#ef4444">Ошибка загрузки деталей</div>';
+    }
+}
+
+function formatBytes(bytes) {
+    if (!bytes || bytes <= 0) return '0';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(0) + ' KB';
+    return (bytes / 1048576).toFixed(0) + ' MB';
+}
+
+function showAddKeenetic() {
+    document.getElementById('addKeeneticModal').style.display = 'flex';
+    document.getElementById('addKeeneticForm').onsubmit = async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const body = {
+            name: fd.get('name'),
+            host: fd.get('host'),
+            web_url: fd.get('web_url') || fd.get('host'),
+            anydesk: fd.get('anydesk') || '',
+            login: fd.get('login') || 'admin',
+            password: fd.get('password'),
+        };
+        try {
+            const resp = await fetch('/api/keenetic/add', {
+                method: 'POST', credentials: 'include',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body),
+            });
+            const data = await resp.json();
+            if (data.status === 'ok') {
+                closeModal('addKeeneticModal');
+                e.target.reset();
+                await refreshAllKeenetic();
+            } else {
+                alert(data.detail || 'Error');
+            }
+        } catch (err) { alert('Error: ' + err.message); }
+    };
+}
+
+function showImportKeenetic() {
+    document.getElementById('importKeeneticResult').style.display = 'none';
+    document.getElementById('importKeeneticModal').style.display = 'flex';
+    document.getElementById('importKeeneticForm').onsubmit = async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const btn = e.target.querySelector('button[type=submit]');
+        btn.disabled = true;
+        try {
+            const resp = await fetch('/api/keenetic/import', {
+                method: 'POST', credentials: 'include',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    tsv: fd.get('tsv'),
+                    login: fd.get('login') || 'admin',
+                    password: fd.get('password'),
+                }),
+            });
+            const data = await resp.json();
+            const resultDiv = document.getElementById('importKeeneticResult');
+            if (data.status === 'ok') {
+                resultDiv.innerHTML = `✅ Добавлено: ${(data.added || []).join(', ') || '—'}`
+                    + (data.skipped?.length ? `<br>⏭ Пропущено: ${data.skipped.join(', ')}` : '');
+                resultDiv.style.display = 'block';
+                await refreshAllKeenetic();
+            } else {
+                resultDiv.innerHTML = `❌ ${data.detail || 'Error'}`;
+                resultDiv.style.display = 'block';
+            }
+        } catch (err) { alert('Error: ' + err.message); }
+        btn.disabled = false;
+    };
+}
+
+function showBulkAddKeenetic() {
+    document.getElementById('bulkAddResult').style.display = 'none';
+    document.getElementById('bulkAddKeeneticModal').style.display = 'flex';
+    document.getElementById('bulkAddKeeneticForm').onsubmit = async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const body = {
+            domains: fd.get('domains'),
+            login: fd.get('login') || 'admin',
+            password: fd.get('password'),
+        };
+        const btn = e.target.querySelector('button[type=submit]');
+        btn.disabled = true;
+        btn.textContent = '⏳ Добавление...';
+        try {
+            const resp = await fetch('/api/keenetic/add-bulk', {
+                method: 'POST', credentials: 'include',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body),
+            });
+            const data = await resp.json();
+            const resultDiv = document.getElementById('bulkAddResult');
+            if (data.status === 'ok') {
+                let msg = `✅ Добавлено: ${data.added.length} роутеров`;
+                if (data.added.length) msg += `<br><b>${data.added.join(', ')}</b>`;
+                if (data.skipped.length) msg += `<br>⏭ Пропущено (уже есть): ${data.skipped.join(', ')}`;
+                resultDiv.innerHTML = msg;
+                resultDiv.style.display = 'block';
+                e.target.querySelector('textarea').value = '';
+                await loadKeenetic();
+            } else {
+                resultDiv.innerHTML = `❌ ${data.detail || 'Error'}`;
+                resultDiv.style.display = 'block';
+            }
+        } catch (err) {
+            alert('Error: ' + err.message);
+        }
+        btn.disabled = false;
+        btn.textContent = 'Добавить все';
+    };
+}
+
+let keeneticRefreshCooldown = 0;
+
+async function refreshKeenetic(name) {
+    const now = Date.now();
+    if (now < keeneticRefreshCooldown) {
+        console.log('Keenetic refresh cooldown, skip');
+        return;
+    }
+    keeneticRefreshCooldown = now + 30000; // 30s cooldown
+
+    const card = document.querySelector(`[data-keen="${name}"]`);
+    if (card) card.classList.add('loading');
+    try {
+        const resp = await fetch(`/api/keenetic/refresh/${name}`, {
+            method: 'POST', credentials: 'include',
+        });
+        const resp2 = await fetch('/api/keenetic/list', {credentials: 'include'});
+        keeneticDevices = await resp2.json();
+        renderKeenetic();
+    } catch (e) { console.error('Keenetic refresh error:', e); }
+}
+
+async function refreshAllKeenetic() {
+    const now = Date.now();
+    if (now < keeneticRefreshCooldown) {
+        console.log('Keenetic refresh cooldown, skip');
+        return;
+    }
+    keeneticRefreshCooldown = now + 30000;
+
+    document.querySelectorAll('#keenetic-grid .server-card').forEach(c => c.classList.add('loading'));
+    const grid = document.getElementById('keenetic-grid');
+    if (!keeneticDevices.length) {
+        grid.innerHTML = '<div style="text-align:center;padding:60px;opacity:0.5;grid-column:1/-1">⏳ Загрузка...</div>';
+    }
+    try {
+        const resp = await fetch('/api/keenetic/refresh-all', {
+            method: 'POST', credentials: 'include',
+        });
+        const resp2 = await fetch('/api/keenetic/list', {credentials: 'include'});
+        keeneticDevices = await resp2.json();
+        renderKeenetic();
+    } catch (e) { console.error('Keenetic refresh-all error:', e); }
+}
+
+async function rebootKeenetic(name) {
+    if (!confirm(`Перезагрузить роутер "${name}"?`)) return;
+    try {
+        const resp = await fetch(`/api/keenetic/reboot/${name}`, {
+            method: 'POST', credentials: 'include',
+        });
+        const data = await resp.json();
+        if (data.status === 'ok') {
+            alert(`✅ Команда перезагрузки отправлена: ${name}`);
+        } else {
+            alert(`❌ Ошибка: ${data.detail || 'unknown'}`);
+        }
+    } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function deleteKeenetic(name) {
+    if (!confirm(`Удалить роутер "${name}"?`)) return;
+    try {
+        await fetch(`/api/keenetic/${name}`, {
+            method: 'DELETE', credentials: 'include',
+        });
+        await loadKeenetic();
+    } catch (e) { alert('Error: ' + e.message); }
+}
+
 // ===================== INIT =====================
 document.addEventListener('DOMContentLoaded', () => {
     applyTheme(currentTheme);
-    renderPage();
-    loadServers();
+    loadMutedDevices().then(() => {
+        renderPage();
+        loadServers();
+    });
 });
 
 setInterval(() => {
@@ -1062,4 +1561,5 @@ setInterval(() => {
     else if (activeTab === 'pc') loadPCs();
     else if (activeTab === 'synology') loadSynology();
     else if (activeTab === 'ha') loadHA();
+    else if (activeTab === 'keenetic') loadKeenetic();
 }, 30000);
