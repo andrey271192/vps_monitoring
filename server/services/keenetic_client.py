@@ -1,7 +1,10 @@
 """Keenetic router RCI API client for monitoring via KeenDNS."""
 
+import asyncio
 import hashlib
 import logging
+import re
+import socket
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -10,6 +13,8 @@ import aiohttp
 logger = logging.getLogger(__name__)
 
 KEENDNS_MARKERS = (".pro", ".club", ".link", "netcraze", "keenetic")
+AUTH_RETRIES = 3
+_IP_HOST_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
 
 
 def normalize_web_url(url: str) -> str:
@@ -22,22 +27,50 @@ def normalize_web_url(url: str) -> str:
     return url.rstrip("/")
 
 
+def is_public_ip_host(host: str) -> bool:
+    """True when host is a bare IPv4 (optional :port), not KeenDNS."""
+    if not host:
+        return False
+    return bool(_IP_HOST_RE.match(host.split(":")[0]))
+
+
+def is_keendns_host(host: str) -> bool:
+    domain = (host or "").split(":")[0].lower()
+    return any(m in domain for m in KEENDNS_MARKERS)
+
+
+def client_timeout_for(host: str) -> aiohttp.ClientTimeout:
+    """Timeouts tuned for KeenDNS vs direct IP."""
+    if is_public_ip_host(host):
+        return aiohttp.ClientTimeout(total=20, connect=8, sock_read=12)
+    return aiohttp.ClientTimeout(total=45, connect=15, sock_read=30)
+
+
 def build_api_base_url(host: str, web_url: str = "") -> str:
-    """Build RCI API base URL from host and/or Keenetic web URL column."""
-    raw = (host or "").strip()
-    if not raw and web_url:
+    """Build RCI API base URL — prefer scheme/host/port from web_url."""
+    if web_url:
         parsed = urlparse(normalize_web_url(web_url))
-        raw = parsed.netloc or (parsed.path.split("/")[0] if parsed.path else "")
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+
+    raw = (host or "").strip()
     if not raw:
         return ""
 
     if raw.startswith("http://") or raw.startswith("https://"):
         return raw.rstrip("/")
 
-    domain = raw.split(":")[0].lower()
-    is_keendns = any(m in domain for m in KEENDNS_MARKERS)
-    scheme = "https" if is_keendns else "http"
+    scheme = "https" if is_keendns_host(raw) else "http"
     return f"{scheme}://{raw}".rstrip("/")
+
+
+def _make_connector() -> aiohttp.TCPConnector:
+    """IPv4-only: avoids aiohttp hanging on broken IPv6 for KeenDNS multi-A records."""
+    return aiohttp.TCPConnector(
+        family=socket.AF_INET,
+        force_close=True,
+        enable_cleanup_closed=True,
+    )
 
 
 class KeeneticClient:
@@ -56,6 +89,8 @@ class KeeneticClient:
         if not base:
             raise ValueError("host or web_url required")
         self.base_url = base
+        parsed = urlparse(base)
+        self._host_key = parsed.netloc or host
         self.login = login
         self.password = password
         self._session: Optional[aiohttp.ClientSession] = None
@@ -64,68 +99,113 @@ class KeeneticClient:
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
-            timeout = aiohttp.ClientTimeout(total=25, connect=10)
+            timeout = client_timeout_for(self._host_key)
             jar = aiohttp.CookieJar(unsafe=True)
-            self._session = aiohttp.ClientSession(timeout=timeout, cookie_jar=jar)
+            self._session = aiohttp.ClientSession(
+                timeout=timeout,
+                cookie_jar=jar,
+                connector=_make_connector(),
+                version=aiohttp.HttpVersion11,
+                headers={"User-Agent": "VPS-Monitoring/1.0"},
+            )
         return self._session
 
-    async def authenticate(self) -> bool:
-        """Perform challenge-response authentication."""
+    async def _reset_session(self):
+        if self._session and not self._session.closed:
+            await self._session.close()
+        self._session = None
+        self._authenticated = False
+
+    def _timeout_error_message(self) -> str:
+        if is_public_ip_host(self._host_key):
+            return (
+                "HTTP API не отвечает с VPS (прямой IP). "
+                "Нужен KeenDNS или удалённый доступ Keenetic."
+            )
+        return "Connection timeout"
+
+    async def _authenticate_once(self) -> bool:
+        """Single auth attempt."""
         self.last_error = ""
         session = await self._get_session()
         auth_url = f"{self.base_url}/auth"
 
-        try:
-            async with session.get(auth_url, ssl=False) as resp:
-                if resp.status == 200:
-                    self._authenticated = True
-                    return True
+        async with session.get(auth_url, ssl=False) as resp:
+            if resp.status == 200:
+                self._authenticated = True
+                return True
 
-                if resp.status != 401:
-                    if resp.status in (400, 403):
-                        self.last_error = "Wrong protocol or port (try http/https)"
-                    else:
-                        self.last_error = f"Auth HTTP {resp.status}"
-                    logger.error(f"Keenetic auth unexpected status: {resp.status} @ {self.base_url}")
-                    return False
-
-                challenge = resp.headers.get("X-NDM-Challenge", "")
-                realm = resp.headers.get("X-NDM-Realm", "")
-
-                if not challenge or not realm:
-                    self.last_error = "No auth challenge from router"
-                    logger.error("Keenetic auth: missing challenge/realm headers")
-                    return False
-
-            md5_input = f"{self.login}:{realm}:{self.password}"
-            md5_hex = hashlib.md5(md5_input.encode("utf-8")).hexdigest()
-            sha_input = f"{challenge}{md5_hex}"
-            sha_hex = hashlib.sha256(sha_input.encode("utf-8")).hexdigest()
-
-            async with session.post(
-                auth_url,
-                json={"login": self.login, "password": sha_hex},
-                ssl=False,
-            ) as resp:
-                if resp.status == 200:
-                    self._authenticated = True
-                    return True
-                self.last_error = "Wrong login or password"
-                logger.error(f"Keenetic auth failed: {resp.status} @ {self.base_url}")
+            if resp.status != 401:
+                if resp.status in (400, 403):
+                    self.last_error = "Wrong protocol or port (try http/https)"
+                else:
+                    self.last_error = f"Auth HTTP {resp.status}"
+                logger.error(
+                    f"Keenetic auth unexpected status: {resp.status} @ {self.base_url}"
+                )
                 return False
 
-        except aiohttp.ClientConnectorError as e:
-            self.last_error = "Cannot connect to router"
-            logger.error(f"Keenetic auth error: {type(e).__name__}: {e}")
+            challenge = resp.headers.get("X-NDM-Challenge", "")
+            realm = resp.headers.get("X-NDM-Realm", "")
+
+            if not challenge or not realm:
+                self.last_error = "No auth challenge from router"
+                logger.error("Keenetic auth: missing challenge/realm headers")
+                return False
+
+        md5_input = f"{self.login}:{realm}:{self.password}"
+        md5_hex = hashlib.md5(md5_input.encode("utf-8")).hexdigest()
+        sha_input = f"{challenge}{md5_hex}"
+        sha_hex = hashlib.sha256(sha_input.encode("utf-8")).hexdigest()
+
+        async with session.post(
+            auth_url,
+            json={"login": self.login, "password": sha_hex},
+            ssl=False,
+        ) as resp:
+            if resp.status == 200:
+                self._authenticated = True
+                return True
+            self.last_error = "Wrong login or password"
+            logger.error(f"Keenetic auth failed: {resp.status} @ {self.base_url}")
             return False
-        except TimeoutError:
-            self.last_error = "Connection timeout"
-            logger.error(f"Keenetic auth timeout @ {self.base_url}")
-            return False
-        except Exception as e:
-            self.last_error = type(e).__name__
-            logger.error(f"Keenetic auth error: {type(e).__name__}: {e}")
-            return False
+
+    async def authenticate(self) -> bool:
+        """Perform challenge-response authentication with retries."""
+        retryable = (
+            aiohttp.ServerTimeoutError,
+            aiohttp.ClientOSError,
+            asyncio.TimeoutError,
+            TimeoutError,
+        )
+        for attempt in range(AUTH_RETRIES):
+            try:
+                return await self._authenticate_once()
+            except aiohttp.ClientConnectorError as e:
+                err = str(e).lower()
+                if "name or service not known" in err or "nodename nor servname" in err:
+                    self.last_error = "DNS не резолвится с VPS"
+                else:
+                    self.last_error = "Cannot connect to router"
+                logger.error(f"Keenetic auth error: {type(e).__name__}: {e}")
+                return False
+            except retryable as e:
+                self.last_error = self._timeout_error_message()
+                logger.warning(
+                    f"Keenetic auth timeout ({attempt + 1}/{AUTH_RETRIES}) "
+                    f"@ {self.base_url}: {type(e).__name__}"
+                )
+                await self._reset_session()
+                if attempt + 1 < AUTH_RETRIES:
+                    await asyncio.sleep(1.5 * (attempt + 1))
+                    continue
+                logger.error(f"Keenetic auth timeout @ {self.base_url}")
+                return False
+            except Exception as e:
+                self.last_error = type(e).__name__
+                logger.error(f"Keenetic auth error: {type(e).__name__}: {e}")
+                return False
+        return False
 
     async def rci_show(self, command: str, params: Optional[dict] = None) -> Optional[dict]:
         """GET /rci/show/<command> with optional query params."""
@@ -159,18 +239,42 @@ class KeeneticClient:
             if not await self.authenticate():
                 return None
 
-        session = await self._get_session()
+        retryable = (
+            aiohttp.ServerTimeoutError,
+            aiohttp.ClientOSError,
+            asyncio.TimeoutError,
+            TimeoutError,
+        )
         url = f"{self.base_url}/rci/"
-
-        try:
-            async with session.post(url, json=body, ssl=False) as resp:
-                if resp.status == 200:
-                    return await resp.json(content_type=None)
-                logger.error(f"Keenetic RCI POST: HTTP {resp.status}")
+        for attempt in range(AUTH_RETRIES):
+            try:
+                session = await self._get_session()
+                async with session.post(url, json=body, ssl=False) as resp:
+                    if resp.status == 200:
+                        return await resp.json(content_type=None)
+                    if resp.status == 401:
+                        self._authenticated = False
+                        if await self.authenticate():
+                            continue
+                    logger.error(f"Keenetic RCI POST: HTTP {resp.status}")
+                    return None
+            except retryable as e:
+                logger.warning(
+                    f"Keenetic RCI POST timeout ({attempt + 1}/{AUTH_RETRIES}) "
+                    f"@ {self.base_url}: {type(e).__name__}"
+                )
+                await self._reset_session()
+                if not await self.authenticate():
+                    return None
+                if attempt + 1 < AUTH_RETRIES:
+                    await asyncio.sleep(1.5 * (attempt + 1))
+                    continue
+                logger.error(f"Keenetic RCI POST error: {type(e).__name__}: {e}")
                 return None
-        except Exception as e:
-            logger.error(f"Keenetic RCI POST error: {type(e).__name__}: {e}")
-            return None
+            except Exception as e:
+                logger.error(f"Keenetic RCI POST error: {type(e).__name__}: {e}")
+                return None
+        return None
 
     async def collect_metrics(self, cached_info: Optional[dict] = None) -> dict:
         """Lightweight refresh: system + internet + VPN only."""

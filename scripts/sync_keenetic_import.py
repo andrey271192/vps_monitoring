@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
-"""Sync keenetic.json with canonical import list (names, web_url, anydesk)."""
+"""Sync keenetic.json with canonical router list (24 entries, exact URLs)."""
 import json
 import sys
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
+# Authoritative list: Russian name, exact web URL, AnyDesk (optional)
 IMPORT = [
+    ("Москва Сити Асланян", "https://moscowcity.netcraze.pro:5443", ""),
+    ("Вымпел Асланян", "https://vimpel.netcraze.link", ""),
+    ("Асланян Квартира", "https://eropkinskii.netcraze.club", ""),
+    ("Новоглаголево Лилиана", "http://91.77.164.164", ""),
+    ("Лилиана Фотиева", "https://fotieva.netcraze.link", ""),
     ("Лилиана Лофт", "https://loftliliana.netcraze.pro", "1020687391"),
     ("Артем vtb126", "https://vtb126.netcraze.club", ""),
     ("Артем Квартира Подмосковный", "http://95.165.93.46:777", "1527495291"),
@@ -43,9 +49,6 @@ def host_from_url(url: str) -> str:
     return parsed.netloc or url.replace("https://", "").replace("http://", "").rstrip("/")
 
 
-IMPORT_HOSTS = {host_from_url(url) for _, url, _ in IMPORT}
-
-
 def make_device(name, keenetic_url, login, password, anydesk="", added=None):
     keenetic_url = normalize_web_url(keenetic_url)
     host = host_from_url(keenetic_url)
@@ -64,6 +67,7 @@ def sync_file(path: Path, default_password: str):
     with open(path) as f:
         old = json.load(f)
 
+    by_name = {d.get("name", ""): d for d in old}
     by_host = {d.get("host", ""): d for d in old}
     path.with_suffix(".json.bak").write_text(
         json.dumps(old, indent=2, ensure_ascii=False), encoding="utf-8"
@@ -72,25 +76,14 @@ def sync_file(path: Path, default_password: str):
     result = []
     for name, url, ad in IMPORT:
         host = host_from_url(url)
-        prev = by_host.get(host, {})
+        prev = by_name.get(name) or by_host.get(host, {})
         login = prev.get("login", "admin")
         password = prev.get("password") or default_password
         added = prev.get("added")
         result.append(make_device(name, url, login, password, ad, added))
 
-    for d in old:
-        host = d.get("host", "")
-        if host in IMPORT_HOSTS:
-            continue
-        if not d.get("web_url") and host:
-            h = host
-            d["web_url"] = normalize_web_url(
-                h if h.startswith("http") else ("http://" if h[0].isdigit() else "https://") + h
-            )
-        result.append(d)
-
     path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"Wrote {len(result)} devices ({len(IMPORT)} import + {len(result) - len(IMPORT)} extra)")
+    print(f"Wrote {len(result)} devices (canonical import)")
 
 
 if __name__ == "__main__":

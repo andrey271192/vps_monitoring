@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check Keenetic API connectivity for all routers."""
+"""Fast auth-only check for all routers (no RCI batch)."""
 import asyncio
 import json
 import sys
@@ -11,7 +11,7 @@ from server.services.keenetic_client import KeeneticClient
 DATA = Path("/opt/vps-monitoring/data/keenetic.json")
 
 
-async def check(dev):
+async def one(dev):
     c = KeeneticClient(
         host=dev.get("host", ""),
         login=dev.get("login", "admin"),
@@ -19,13 +19,12 @@ async def check(dev):
         web_url=dev.get("web_url", ""),
     )
     try:
-        m = await c.collect_metrics()
-        if m.get("online"):
-            return "online"
-        err = (m.get("error") or "unknown")[:80]
-        return f"offline: {err}"
+        ok = await c.authenticate()
+        if ok:
+            return "ONLINE"
+        return f"OFFLINE: {c.last_error}"
     except Exception as e:
-        return f"err: {str(e)[:80]}"
+        return f"ERR: {e}"
     finally:
         await c.close()
 
@@ -33,10 +32,16 @@ async def check(dev):
 async def main():
     with open(DATA) as f:
         devices = json.load(f)
+    online = 0
     for d in devices:
-        r = await check(d)
-        print(f"{d['name']:22} {r}")
-        await asyncio.sleep(1)
+        r = await one(d)
+        if r == "ONLINE":
+            online += 1
+        name = d["name"]
+        url = d.get("web_url", "")
+        print(f"{name:28} {r:40} {url}")
+        await asyncio.sleep(0.3)
+    print(f"\nTotal: {online}/{len(devices)} ONLINE")
 
 
 if __name__ == "__main__":
