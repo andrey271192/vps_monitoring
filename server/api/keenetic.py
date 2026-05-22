@@ -23,9 +23,10 @@ logger = logging.getLogger(__name__)
 
 keenetic_metrics: Dict[str, dict] = {}
 _refresh_all_running = False
+_poll_lock = asyncio.Lock()
 
 KEENETIC_FILE = DATA_DIR / "keenetic.json"
-DEVICE_REFRESH_TIMEOUT = 75
+DEVICE_REFRESH_TIMEOUT = 45
 REFRESH_ALL_GAP_SEC = 2
 
 
@@ -93,6 +94,11 @@ async def _refresh_device(dev: dict) -> dict:
         return metrics
     finally:
         await client.close()
+
+
+async def _refresh_device_locked(dev: dict) -> dict:
+    async with _poll_lock:
+        return await _refresh_device(dev)
 
 
 @router.get("/list")
@@ -264,7 +270,7 @@ async def keenetic_update(name: str, request: Request, user: str = Depends(requi
     result = {"status": "ok", "web_url": web_url, "host": host}
     if body.get("refresh", True):
         try:
-            metrics = await _refresh_device(devices[idx])
+            metrics = await _refresh_device_locked(devices[idx])
             result["metrics"] = metrics
         except Exception as e:
             result["refresh_error"] = str(e)
@@ -289,7 +295,7 @@ async def keenetic_refresh(name: str, request: Request, user: str = Depends(requ
         return {"status": "error", "detail": "router not found"}
 
     try:
-        metrics = await _refresh_device(dev)
+        metrics = await _refresh_device_locked(dev)
         if not metrics["online"] and metrics.get("error"):
             return {"status": "error", "detail": metrics["error"], "metrics": metrics}
         return {"status": "ok", "metrics": metrics}
@@ -302,18 +308,19 @@ async def _refresh_all_devices() -> list:
     devices = _load_keenetic()
     results = []
     try:
-        for i, dev in enumerate(devices):
-            try:
-                metrics = await _refresh_device(dev)
-                results.append({
-                    "name": dev["name"],
-                    "online": metrics["online"],
-                    "error": metrics.get("error", ""),
-                })
-            except Exception as e:
-                results.append({"name": dev["name"], "online": False, "error": str(e)})
-            if i + 1 < len(devices):
-                await asyncio.sleep(REFRESH_ALL_GAP_SEC)
+        async with _poll_lock:
+            for i, dev in enumerate(devices):
+                try:
+                    metrics = await _refresh_device(dev)
+                    results.append({
+                        "name": dev["name"],
+                        "online": metrics["online"],
+                        "error": metrics.get("error", ""),
+                    })
+                except Exception as e:
+                    results.append({"name": dev["name"], "online": False, "error": str(e)})
+                if i + 1 < len(devices):
+                    await asyncio.sleep(REFRESH_ALL_GAP_SEC)
     finally:
         _refresh_all_running = False
     return results
@@ -374,18 +381,19 @@ async def keenetic_reboot(name: str, request: Request, user: str = Depends(requi
 
 async def keenetic_monitor_loop():
     """Background polling for all Keenetic routers."""
-    await asyncio.sleep(15)
+    await asyncio.sleep(5)
     while True:
         try:
             devices = _load_keenetic()
-            if devices:
+            if devices and not _refresh_all_running:
                 logger.info(f"Keenetic monitor: refreshing {len(devices)} routers")
-                for dev in devices:
-                    try:
-                        await _refresh_device(dev)
-                    except Exception as e:
-                        logger.error(f"Keenetic refresh {dev['name']}: {e}")
-                    await asyncio.sleep(REFRESH_ALL_GAP_SEC)
+                async with _poll_lock:
+                    for dev in devices:
+                        try:
+                            await _refresh_device(dev)
+                        except Exception as e:
+                            logger.error(f"Keenetic refresh {dev['name']}: {e}")
+                        await asyncio.sleep(REFRESH_ALL_GAP_SEC)
         except Exception as e:
             logger.error(f"Keenetic monitor loop error: {e}")
 
