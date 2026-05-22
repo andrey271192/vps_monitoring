@@ -60,7 +60,7 @@ def is_keendns_host(host: str) -> bool:
 def client_timeout_for(host: str, *, probing: bool = False) -> aiohttp.ClientTimeout:
     """Timeouts tuned for KeenDNS vs direct IP."""
     if probing:
-        return aiohttp.ClientTimeout(total=15, connect=4, sock_read=10)
+        return aiohttp.ClientTimeout(total=25, connect=4, sock_read=18)
     if is_public_ip_host(host):
         return aiohttp.ClientTimeout(total=20, connect=8, sock_read=12)
     return aiohttp.ClientTimeout(total=45, connect=12, sock_read=30)
@@ -214,7 +214,6 @@ class KeeneticClient:
                 async with session.get(auth_url, ssl=False) as resp:
                     if resp.status == 200:
                         self._authenticated = True
-                        await self._reset_session(keep_auth=True)
                         return True
 
                     if resp.status != 401:
@@ -250,7 +249,6 @@ class KeeneticClient:
                 ) as resp:
                     if resp.status == 200:
                         self._authenticated = True
-                        await self._reset_session(keep_auth=True)
                         return True
                     self.last_error = "Wrong login or password"
                     logger.error(f"Keenetic auth failed: {resp.status} @ {auth_url}")
