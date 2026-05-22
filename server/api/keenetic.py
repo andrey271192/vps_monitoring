@@ -50,12 +50,11 @@ def _host_from_url(url: str) -> str:
 
 def _make_device(name: str, keenetic_url: str, login: str, password: str,
                  anydesk: str = "") -> dict:
-    keenetic_url = (keenetic_url or "").strip()
-    host = _host_from_url(keenetic_url) if keenetic_url else ""
+    web_url, host = parse_keenetic_web_url(keenetic_url)
     return {
         "name": name,
         "host": host,
-        "web_url": normalize_web_url(keenetic_url) if keenetic_url else "",
+        "web_url": web_url,
         "anydesk": (anydesk or "").strip(),
         "login": login,
         "password": password,
@@ -115,19 +114,20 @@ async def keenetic_list(request: Request, user: str = Depends(require_auth)):
 async def keenetic_add(request: Request, user: str = Depends(require_auth)):
     body = await request.json()
     name = body.get("name", "").strip()
-    host = body.get("host", "").strip()
-    web_url = body.get("web_url", "").strip()
-    if not name or (not host and not web_url):
-        return {"status": "error", "detail": "name and host (or web_url) required"}
+    url_raw = (body.get("web_url") or body.get("host") or "").strip()
+    if not name or not url_raw:
+        return {"status": "error", "detail": "name and web_url (or host) required"}
 
-    if not host and web_url:
-        host = _host_from_url(web_url)
+    try:
+        web_url, host = parse_keenetic_web_url(url_raw)
+    except ValueError as e:
+        return {"status": "error", "detail": str(e)}
 
     devices = _load_keenetic()
     device = {
         "name": name,
         "host": host,
-        "web_url": normalize_web_url(web_url or host),
+        "web_url": web_url,
         "anydesk": body.get("anydesk", "").strip(),
         "login": body.get("login", "admin"),
         "password": body.get("password", ""),
@@ -187,7 +187,11 @@ async def keenetic_import(request: Request, user: str = Depends(require_auth)):
         keen_url = (row.get("keenetic") or row.get("url") or "").strip()
         if not keen_url:
             continue
-        host = _host_from_url(keen_url)
+        try:
+            web_url, host = parse_keenetic_web_url(keen_url)
+        except ValueError:
+            skipped.append(keen_url)
+            continue
         addr = (row.get("address") or row.get("name") or "").strip()
         name = addr.capitalize() if addr else host.split(".")[0].capitalize()
         base_name, counter = name, 2
@@ -197,7 +201,7 @@ async def keenetic_import(request: Request, user: str = Depends(require_auth)):
         if host in existing_hosts:
             skipped.append(host)
             continue
-        device = _make_device(name, keen_url, login, password, row.get("anydesk", ""))
+        device = _make_device(name, web_url, login, password, row.get("anydesk", ""))
         devices.append(device)
         existing_hosts.add(host)
         existing_names.add(name)
@@ -224,8 +228,11 @@ async def keenetic_add_bulk(request: Request, user: str = Depends(require_auth))
     added, skipped = [], []
 
     for raw in lines:
-        keen_url = raw if "://" in raw else f"https://{raw}"
-        host = _host_from_url(keen_url)
+        try:
+            web_url, host = parse_keenetic_web_url(raw)
+        except ValueError:
+            skipped.append(raw)
+            continue
         name = host.split(".")[0].capitalize() if "." in host else host
         base_name, counter = name, 2
         while name in existing:
@@ -234,7 +241,7 @@ async def keenetic_add_bulk(request: Request, user: str = Depends(require_auth))
         if host in existing_hosts:
             skipped.append(host)
             continue
-        device = _make_device(name, keen_url, login, password)
+        device = _make_device(name, web_url, login, password)
         devices.append(device)
         existing.add(name)
         existing_hosts.add(host)

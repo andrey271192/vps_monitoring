@@ -4,28 +4,28 @@ import asyncio
 import hashlib
 import logging
 import re
-import socket
 from typing import Optional
 from urllib.parse import urlparse
 
-import aiohttp
+import httpx
 
 logger = logging.getLogger(__name__)
 
 KEENDNS_MARKERS = (".pro", ".club", ".link", "netcraze", "keenetic")
 AUTH_RETRIES = 2
-BLOCKED_IPS = frozenset({"0.0.0.0", "127.0.0.1"})
+DEFAULT_TIMEOUT = 25.0
+RCI_TIMEOUT = 45.0
 _IP_HOST_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
 
 
 def normalize_web_url(url: str) -> str:
     """Ensure web UI URL has a scheme (https by default)."""
-    url = (url or "").strip()
+    url = (url or "").strip().rstrip("/")
     if not url:
         return ""
-    if not url.startswith("http://") and not url.startswith("https://"):
+    if not url.startswith(("http://", "https://")):
         url = "https://" + url
-    return url.rstrip("/")
+    return url
 
 
 def parse_keenetic_web_url(url: str) -> tuple[str, str]:
@@ -33,10 +33,7 @@ def parse_keenetic_web_url(url: str) -> tuple[str, str]:
     raw = (url or "").strip()
     if not raw:
         raise ValueError("Укажите адрес KeenDNS")
-    if "://" in raw:
-        normalized = raw.rstrip("/")
-    else:
-        normalized = f"https://{raw}".rstrip("/")
+    normalized = normalize_web_url(raw if "://" in raw else raw)
     parsed = urlparse(normalized)
     if not parsed.scheme or parsed.scheme not in ("http", "https"):
         raise ValueError("Адрес должен начинаться с http:// или https://")
@@ -57,73 +54,81 @@ def is_keendns_host(host: str) -> bool:
     return any(m in domain for m in KEENDNS_MARKERS)
 
 
-def client_timeout_for(host: str, *, probing: bool = False) -> aiohttp.ClientTimeout:
-    """Timeouts tuned for KeenDNS vs direct IP."""
-    if probing:
-        return aiohttp.ClientTimeout(total=25, connect=4, sock_read=18)
-    if is_public_ip_host(host):
-        return aiohttp.ClientTimeout(total=20, connect=8, sock_read=12)
-    return aiohttp.ClientTimeout(total=45, connect=12, sock_read=30)
+def _default_port(scheme: str) -> int:
+    return 443 if scheme == "https" else 80
 
 
-async def resolve_ipv4_addresses(hostname: str) -> list[str]:
-    """Resolve KeenDNS A records, skipping placeholder/blocked addresses."""
-    if not hostname or is_public_ip_host(hostname.split(":")[0]):
-        return []
-    loop = asyncio.get_running_loop()
+def resolve_api_base(web_url: str = "", host: str = "") -> str:
+    """Build RCI base URL (scheme + host + port) — keenetic-unified rci_base_url pattern."""
+    raw = (web_url or host or "").strip()
+    if not raw:
+        return ""
+    if "://" not in raw:
+        scheme = "http" if is_public_ip_host(raw.split("/")[0]) else "https"
+        raw = f"{scheme}://{raw.lstrip('/')}"
     try:
-        infos = await loop.getaddrinfo(
-            hostname, None, family=socket.AF_INET, type=socket.SOCK_STREAM,
-        )
-    except socket.gaierror:
-        return []
-    result, seen = [], set()
-    for info in infos:
-        ip = info[4][0]
-        if ip in BLOCKED_IPS or ip in seen:
-            continue
-        seen.add(ip)
-        result.append(ip)
-    return result
+        parsed = urlparse(raw)
+    except Exception:
+        return ""
+    hostname = (parsed.hostname or "").strip()
+    if not hostname:
+        return ""
+    scheme = (parsed.scheme or "https").lower()
+    if scheme not in ("http", "https"):
+        scheme = "https"
+    port = parsed.port if parsed.port is not None else _default_port(scheme)
+    netloc = hostname if port == _default_port(scheme) else f"{hostname}:{port}"
+    return f"{scheme}://{netloc}"
 
 
 def build_api_base_url(host: str, web_url: str = "") -> str:
-    """Build RCI API base URL — prefer scheme/host/port from web_url."""
+    """Prefer scheme/host/port from web_url over bare host."""
     if web_url:
-        parsed = urlparse(normalize_web_url(web_url))
-        if parsed.scheme and parsed.netloc:
-            return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
-
-    raw = (host or "").strip()
-    if not raw:
-        return ""
-
-    if raw.startswith("http://") or raw.startswith("https://"):
-        return raw.rstrip("/")
-
-    scheme = "https" if is_keendns_host(raw) else "http"
-    return f"{scheme}://{raw}".rstrip("/")
+        base = resolve_api_base(web_url=web_url)
+        if base:
+            return base
+    return resolve_api_base(host=host)
 
 
-def _make_connector() -> aiohttp.TCPConnector:
-    """IPv4-only: avoids aiohttp hanging on broken IPv6 for KeenDNS multi-A records."""
-    return aiohttp.TCPConnector(
-        family=socket.AF_INET,
-        force_close=True,
-        enable_cleanup_closed=True,
-        ttl_dns_cache=30,
-    )
+async def _authenticate(
+    client: httpx.AsyncClient, base: str, login: str, password: str,
+) -> tuple[bool, str]:
+    """Keenetic /auth challenge-response (keenetic-unified keenetic_rci pattern)."""
+    auth_url = f"{base.rstrip('/')}/auth"
+    try:
+        resp = await client.get(auth_url)
+        if resp.status_code == 200:
+            return True, ""
+        if resp.status_code != 401:
+            if resp.status_code in (400, 403):
+                return False, "Wrong protocol or port (try http/https)"
+            return False, f"Auth HTTP {resp.status_code}"
+
+        realm = resp.headers.get("X-NDM-Realm", "")
+        challenge = resp.headers.get("X-NDM-Challenge", "")
+        if not realm or not challenge:
+            return False, "No auth challenge from router"
+
+        md5_hex = hashlib.md5(f"{login}:{realm}:{password}".encode()).hexdigest()
+        sha_hex = hashlib.sha256(f"{challenge}{md5_hex}".encode()).hexdigest()
+        resp2 = await client.post(auth_url, json={"login": login, "password": sha_hex})
+        if resp2.status_code == 200:
+            return True, ""
+        return False, "Wrong login or password"
+    except httpx.TimeoutException:
+        return False, "timeout"
+    except httpx.ConnectError as exc:
+        err = str(exc).lower()
+        if "name or service not known" in err or "nodename nor servname" in err:
+            return False, "dns"
+        return False, "connect"
+    except Exception as exc:
+        logger.warning("Keenetic auth %s: %s", base, exc)
+        return False, type(exc).__name__
 
 
 class KeeneticClient:
-    """Async client for Keenetic router RCI API.
-
-    Auth flow:
-      1. GET /auth -> 401 with X-NDM-Challenge + X-NDM-Realm headers
-      2. Compute: md5(login:realm:password) -> sha256(challenge + md5_hex)
-      3. POST /auth {"login": ..., "password": sha256_hex}
-      4. Session cookie persists for subsequent requests
-    """
+    """Async client for Keenetic router RCI API via httpx (KeenDNS relay)."""
 
     def __init__(self, host: str, login: str = "admin", password: str = "",
                  web_url: str = ""):
@@ -133,56 +138,25 @@ class KeeneticClient:
         self.base_url = base
         parsed = urlparse(base)
         self._host_key = parsed.netloc or host
-        self._hostname = parsed.hostname or ""
-        self._port = parsed.port or (443 if parsed.scheme == "https" else 80)
-        self._scheme = parsed.scheme or "https"
-        self._netloc = parsed.netloc or host
-        self._active_target: Optional[str] = None
-        self._resolved_ips: list[str] = []
         self.login = login
         self.password = password
-        self._session: Optional[aiohttp.ClientSession] = None
-        self._authenticated = False
+        self._client: Optional[httpx.AsyncClient] = None
         self.last_error = ""
 
-    def _effective_base(self) -> str:
-        if self._active_target:
-            port = f":{self._port}" if self._port not in (80, 443) else ""
-            return f"{self._scheme}://{self._active_target}{port}"
-        return self.base_url.rstrip("/")
-
-    def _request_headers(self) -> dict:
-        headers = {"User-Agent": "VPS-Monitoring/1.0"}
-        if self._active_target:
-            headers["Host"] = self._netloc
-        return headers
-
-    async def _connection_targets(self) -> list[str]:
-        if is_public_ip_host(self._hostname):
-            return [self._hostname]
-        if not self._resolved_ips:
-            self._resolved_ips = await resolve_ipv4_addresses(self._hostname)
-        return self._resolved_ips + [self._hostname]
-
-    async def _get_session(self, *, probing: bool = False) -> aiohttp.ClientSession:
-        if self._session is None or self._session.closed:
-            timeout = client_timeout_for(self._host_key, probing=probing)
-            jar = aiohttp.CookieJar(unsafe=True)
-            self._session = aiohttp.ClientSession(
+    async def _get_client(self, timeout: float = DEFAULT_TIMEOUT) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
                 timeout=timeout,
-                cookie_jar=jar,
-                connector=_make_connector(),
-                version=aiohttp.HttpVersion11,
-                headers=self._request_headers(),
+                verify=False,
+                follow_redirects=True,
+                headers={"User-Agent": "VPS-Monitoring/1.0"},
             )
-        return self._session
+        return self._client
 
-    async def _reset_session(self, *, keep_auth: bool = False):
-        if self._session and not self._session.closed:
-            await self._session.close()
-        self._session = None
-        if not keep_auth:
-            self._authenticated = False
+    async def close(self):
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
+        self._client = None
 
     def _timeout_error_message(self) -> str:
         if is_public_ip_host(self._host_key):
@@ -192,171 +166,95 @@ class KeeneticClient:
             )
         return "Connection timeout"
 
-    async def _authenticate_once(self) -> bool:
-        """Single auth attempt; tries each KeenDNS A record before giving up."""
-        self.last_error = ""
-        retryable = (
-            aiohttp.ServerTimeoutError,
-            aiohttp.ClientOSError,
-            asyncio.TimeoutError,
-            TimeoutError,
-        )
-        targets = await self._connection_targets()
-        last_err: Optional[Exception] = None
-
-        for target in targets:
-            await self._reset_session()
-            self._active_target = target if is_public_ip_host(target) else None
-            auth_url = f"{self._effective_base()}/auth"
-
-            try:
-                session = await self._get_session(probing=True)
-                async with session.get(auth_url, ssl=False) as resp:
-                    if resp.status == 200:
-                        self._authenticated = True
-                        return True
-
-                    if resp.status != 401:
-                        if resp.status in (400, 403):
-                            self.last_error = "Wrong protocol or port (try http/https)"
-                            return False
-                        if resp.status in (502, 503, 504):
-                            continue
-                        self.last_error = f"Auth HTTP {resp.status}"
-                        logger.error(
-                            f"Keenetic auth unexpected status: {resp.status} @ {auth_url}"
-                        )
-                        return False
-
-                    challenge = resp.headers.get("X-NDM-Challenge", "")
-                    realm = resp.headers.get("X-NDM-Realm", "")
-
-                    if not challenge or not realm:
-                        self.last_error = "No auth challenge from router"
-                        logger.error("Keenetic auth: missing challenge/realm headers")
-                        return False
-
-                md5_input = f"{self.login}:{realm}:{self.password}"
-                md5_hex = hashlib.md5(md5_input.encode("utf-8")).hexdigest()
-                sha_input = f"{challenge}{md5_hex}"
-                sha_hex = hashlib.sha256(sha_input.encode("utf-8")).hexdigest()
-
-                session = await self._get_session()
-                async with session.post(
-                    auth_url,
-                    json={"login": self.login, "password": sha_hex},
-                    ssl=False,
-                ) as resp:
-                    if resp.status == 200:
-                        self._authenticated = True
-                        return True
-                    self.last_error = "Wrong login or password"
-                    logger.error(f"Keenetic auth failed: {resp.status} @ {auth_url}")
-                    return False
-            except aiohttp.ClientConnectorError as e:
-                last_err = e
-                err = str(e).lower()
-                if "name or service not known" in err or "nodename nor servname" in err:
-                    self.last_error = "DNS не резолвится с VPS"
-                    return False
-                continue
-            except retryable as e:
-                last_err = e
-                logger.debug(
-                    f"Keenetic auth try failed @ {auth_url}: {type(e).__name__}"
-                )
-                continue
-
-        if last_err:
-            if isinstance(last_err, aiohttp.ClientConnectorError):
-                self.last_error = "Cannot connect to router"
-            else:
-                self.last_error = self._timeout_error_message()
-        else:
-            self.last_error = self._timeout_error_message()
-        return False
-
     async def authenticate(self) -> bool:
         """Perform challenge-response authentication with retries."""
+        self.last_error = ""
         for attempt in range(AUTH_RETRIES):
-            if attempt:
-                self._resolved_ips = await resolve_ipv4_addresses(self._hostname)
-                await self._reset_session()
-            if await self._authenticate_once():
+            client = await self._get_client()
+            ok, err = await _authenticate(client, self.base_url, self.login, self.password)
+            if ok:
                 return True
-            if self.last_error == "DNS не резолвится с VPS":
+            if err == "dns":
+                self.last_error = "DNS не резолвится с VPS"
                 return False
+            if err == "Wrong login or password":
+                self.last_error = err
+                return False
+            if err in ("Wrong protocol or port (try http/https)",) or err.startswith("Auth HTTP"):
+                self.last_error = err
+                return False
+            if err == "No auth challenge from router":
+                self.last_error = err
+                return False
+            if err == "connect":
+                self.last_error = "Cannot connect to router"
+                return False
+            if err == "timeout":
+                self.last_error = self._timeout_error_message()
+            else:
+                self.last_error = err or self._timeout_error_message()
+
             if attempt + 1 < AUTH_RETRIES:
                 logger.warning(
                     f"Keenetic auth retry ({attempt + 1}/{AUTH_RETRIES}) "
                     f"@ {self.base_url}: {self.last_error}"
                 )
+                await self.close()
                 await asyncio.sleep(1.5 * (attempt + 1))
         return False
 
     async def rci_show(self, command: str, params: Optional[dict] = None) -> Optional[dict]:
         """GET /rci/show/<command> with optional query params."""
-        if not self._authenticated:
-            if not await self.authenticate():
-                return None
+        if not await self.authenticate():
+            return None
 
-        session = await self._get_session()
+        client = await self._get_client(timeout=RCI_TIMEOUT)
         path = command.replace(" ", "/")
-        url = f"{self._effective_base()}/rci/show/{path}"
+        url = f"{self.base_url}/rci/show/{path}"
 
         try:
-            async with session.get(url, params=params, ssl=False) as resp:
-                if resp.status == 200:
-                    return await resp.json(content_type=None)
-                elif resp.status == 401:
-                    self._authenticated = False
-                    if await self.authenticate():
-                        async with session.get(url, params=params, ssl=False) as resp2:
-                            if resp2.status == 200:
-                                return await resp2.json(content_type=None)
-                logger.error(f"Keenetic RCI {command}: HTTP {resp.status}")
-                return None
+            resp = await client.get(url, params=params)
+            if resp.status_code == 200:
+                return resp.json()
+            if resp.status_code == 401 and await self.authenticate():
+                resp = await client.get(url, params=params)
+                if resp.status_code == 200:
+                    return resp.json()
+            logger.error(f"Keenetic RCI {command}: HTTP {resp.status_code}")
+            return None
         except Exception as e:
             logger.error(f"Keenetic RCI error ({command}): {type(e).__name__}: {e}")
             return None
 
     async def rci_post(self, body: dict) -> Optional[dict]:
         """POST /rci/ with JSON body for batch commands."""
-        if not self._authenticated:
-            if not await self.authenticate():
-                return None
+        if not await self.authenticate():
+            return None
 
-        retryable = (
-            aiohttp.ServerTimeoutError,
-            aiohttp.ClientOSError,
-            asyncio.TimeoutError,
-            TimeoutError,
-        )
-        url = f"{self._effective_base()}/rci/"
+        url = f"{self.base_url}/rci/"
         for attempt in range(AUTH_RETRIES):
             try:
-                session = await self._get_session()
-                async with session.post(url, json=body, ssl=False) as resp:
-                    if resp.status == 200:
-                        return await resp.json(content_type=None)
-                    if resp.status == 401:
-                        self._authenticated = False
-                        if await self.authenticate():
-                            continue
-                    logger.error(f"Keenetic RCI POST: HTTP {resp.status}")
-                    return None
-            except retryable as e:
+                client = await self._get_client(timeout=RCI_TIMEOUT)
+                resp = await client.post(url, json=body)
+                if resp.status_code == 200:
+                    return resp.json()
+                if resp.status_code == 401:
+                    await self.close()
+                    if not await self.authenticate():
+                        return None
+                    continue
+                logger.error(f"Keenetic RCI POST: HTTP {resp.status_code}")
+                return None
+            except httpx.TimeoutException:
                 logger.warning(
-                    f"Keenetic RCI POST timeout ({attempt + 1}/{AUTH_RETRIES}) "
-                    f"@ {self.base_url}: {type(e).__name__}"
+                    f"Keenetic RCI POST timeout ({attempt + 1}/{AUTH_RETRIES}) @ {self.base_url}"
                 )
-                await self._reset_session()
+                await self.close()
                 if not await self.authenticate():
                     return None
                 if attempt + 1 < AUTH_RETRIES:
                     await asyncio.sleep(1.5 * (attempt + 1))
                     continue
-                logger.error(f"Keenetic RCI POST error: {type(e).__name__}: {e}")
                 return None
             except Exception as e:
                 logger.error(f"Keenetic RCI POST error: {type(e).__name__}: {e}")
@@ -477,9 +375,8 @@ class KeeneticClient:
 
     async def collect_detail(self) -> Optional[dict]:
         """Heavy detail fetch: interfaces + connected clients."""
-        if not self._authenticated:
-            if not await self.authenticate():
-                return None
+        if not await self.authenticate():
+            return None
 
         batch = await self.rci_post({
             "show": {
@@ -531,7 +428,3 @@ class KeeneticClient:
                     })
 
         return detail
-
-    async def close(self):
-        if self._session and not self._session.closed:
-            await self._session.close()
