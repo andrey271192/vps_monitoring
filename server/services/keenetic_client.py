@@ -177,11 +177,12 @@ class KeeneticClient:
             )
         return self._session
 
-    async def _reset_session(self):
+    async def _reset_session(self, *, keep_auth: bool = False):
         if self._session and not self._session.closed:
             await self._session.close()
         self._session = None
-        self._authenticated = False
+        if not keep_auth:
+            self._authenticated = False
 
     def _timeout_error_message(self) -> str:
         if is_public_ip_host(self._host_key):
@@ -213,13 +214,16 @@ class KeeneticClient:
                 async with session.get(auth_url, ssl=False) as resp:
                     if resp.status == 200:
                         self._authenticated = True
+                        await self._reset_session(keep_auth=True)
                         return True
 
                     if resp.status != 401:
                         if resp.status in (400, 403):
                             self.last_error = "Wrong protocol or port (try http/https)"
-                        else:
-                            self.last_error = f"Auth HTTP {resp.status}"
+                            return False
+                        if resp.status in (502, 503, 504):
+                            continue
+                        self.last_error = f"Auth HTTP {resp.status}"
                         logger.error(
                             f"Keenetic auth unexpected status: {resp.status} @ {auth_url}"
                         )
@@ -246,6 +250,7 @@ class KeeneticClient:
                 ) as resp:
                     if resp.status == 200:
                         self._authenticated = True
+                        await self._reset_session(keep_auth=True)
                         return True
                     self.last_error = "Wrong login or password"
                     logger.error(f"Keenetic auth failed: {resp.status} @ {auth_url}")
