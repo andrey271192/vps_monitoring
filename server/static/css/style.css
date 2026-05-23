@@ -458,6 +458,41 @@ main {
     width: 100%;
 }
 
+.keenetic-url-edit .form-group {
+    margin-bottom: 8px;
+}
+
+.keenetic-url-edit .form-group label {
+    font-size: 12px;
+    opacity: 0.85;
+}
+
+.keenetic-pass-wrap {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.keenetic-pass-wrap input {
+    flex: 1;
+}
+
+.keenetic-pass-toggle {
+    flex-shrink: 0;
+    padding: 6px 10px;
+    font-size: 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.keenetic-pass-toggle:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
 .server-card-actions .keenetic-url-btn.active {
     border-color: var(--accent);
     color: var(--accent);

@@ -55,7 +55,20 @@ document.addEventListener('click', function(e) {
     if (keenSaveBtn) {
         e.stopPropagation();
         e.preventDefault();
-        saveKeeneticUrl(keenSaveBtn.dataset.name);
+        saveKeeneticEdit(keenSaveBtn.dataset.name);
+        return;
+    }
+
+    const keenPassToggle = e.target.closest('.keenetic-pass-toggle');
+    if (keenPassToggle) {
+        e.stopPropagation();
+        e.preventDefault();
+        const input = document.getElementById(keenPassToggle.dataset.target);
+        if (input) {
+            const show = input.type === 'password';
+            input.type = show ? 'text' : 'password';
+            keenPassToggle.textContent = show ? '🙈' : '👁';
+        }
         return;
     }
 
@@ -1250,6 +1263,8 @@ function renderKeenetic() {
 
         const urlEditId = 'keen-url-' + dev.name.replace(/[^a-zA-Z0-9_-]/g, '_');
         const urlValue = escHtml(keeneticWebUrl(dev));
+        const loginValue = escHtml(dev.login || 'admin');
+        const anydeskValue = escHtml(dev.anydesk || '');
 
         return `
             <div class="server-card ${isOnline ? 'online' : 'offline'}" data-keen="${escHtml(dev.name)}">
@@ -1285,15 +1300,34 @@ function renderKeenetic() {
                 </div>
                 ` : `<div style="padding:20px 0;text-align:center;opacity:0.5">${error ? '⚠️ ' + error : 'Нет данных — нажмите 🔄'}</div>`}
                 <div id="${urlEditId}" class="keenetic-url-edit" style="display:none">
-                    <div class="keenetic-url-edit-title">✏️ Адрес KeenDNS</div>
-                    <div class="form-group" style="margin-bottom:8px">
-                        <label for="${urlEditId}-input">Адрес KeenDNS</label>
-                        <input type="text" id="${urlEditId}-input" value="${urlValue}" placeholder="https://example.keenetic.pro:8443">
+                    <div class="keenetic-url-edit-title">✏️ Редактирование</div>
+                    <div class="form-group">
+                        <label for="${urlEditId}-name">Название</label>
+                        <input type="text" id="${urlEditId}-name" value="${escHtml(dev.name)}" placeholder="Home Router">
+                    </div>
+                    <div class="form-group">
+                        <label for="${urlEditId}-url">Адрес KeenDNS / URL</label>
+                        <input type="text" id="${urlEditId}-url" value="${urlValue}" placeholder="https://example.keenetic.pro:8443">
+                    </div>
+                    <div class="form-group">
+                        <label for="${urlEditId}-login">Логин</label>
+                        <input type="text" id="${urlEditId}-login" value="${loginValue}" placeholder="admin">
+                    </div>
+                    <div class="form-group">
+                        <label for="${urlEditId}-password">Пароль</label>
+                        <div class="keenetic-pass-wrap">
+                            <input type="password" id="${urlEditId}-password" placeholder="Оставьте пустым, чтобы не менять" autocomplete="new-password">
+                            <button type="button" class="keenetic-pass-toggle" data-target="${urlEditId}-password" title="Показать/скрыть">👁</button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="${urlEditId}-anydesk">AnyDesk ID</label>
+                        <input type="text" id="${urlEditId}-anydesk" value="${anydeskValue}" placeholder="1020687391">
                     </div>
                     <button type="button" class="btn-primary keenetic-url-save" style="width:100%" data-name="${escHtml(dev.name)}">Сохранить</button>
                 </div>
                 <div class="server-card-actions">
-                    <button type="button" class="keenetic-url-btn" data-name="${escHtml(dev.name)}">✏️ KeenDNS</button>
+                    <button type="button" class="keenetic-url-btn" data-name="${escHtml(dev.name)}">✏️ Редактировать</button>
                     <button type="button" onclick="event.stopPropagation();refreshKeenetic(${JSON.stringify(dev.name)})">🔄 Обновить</button>
                     <button type="button" onclick="event.stopPropagation();rebootKeenetic(${JSON.stringify(dev.name)})">🔁 Reboot</button>
                     <button type="button" class="danger" onclick="event.stopPropagation();deleteKeenetic(${JSON.stringify(dev.name)})">🗑</button>
@@ -1592,7 +1626,7 @@ function toggleKeeneticUrlEdit(name) {
         card.querySelector('.keenetic-url-btn')?.classList.toggle('active', show);
     }
     if (show) {
-        const input = document.getElementById(keeneticUrlEditId(name) + '-input');
+        const input = document.getElementById(keeneticUrlEditId(name) + '-name');
         if (input) {
             input.focus();
             input.select();
@@ -1601,22 +1635,38 @@ function toggleKeeneticUrlEdit(name) {
     }
 }
 
-async function saveKeeneticUrl(name) {
-    const input = document.getElementById(keeneticUrlEditId(name) + '-input');
-    if (!input) return;
-    const web_url = input.value.trim();
-    if (!web_url) {
-        alert('Укажите адрес KeenDNS');
+async function saveKeeneticEdit(oldName) {
+    const id = keeneticUrlEditId(oldName);
+    const newName = document.getElementById(id + '-name')?.value.trim();
+    const web_url = document.getElementById(id + '-url')?.value.trim();
+    const login = document.getElementById(id + '-login')?.value.trim();
+    const password = document.getElementById(id + '-password')?.value;
+    const anydesk = document.getElementById(id + '-anydesk')?.value.trim() || '';
+
+    if (!newName) {
+        alert('Укажите название');
         return;
     }
-    const saveBtn = input.closest('.keenetic-url-edit')?.querySelector('.btn-primary');
+    if (!web_url) {
+        alert('Укажите адрес KeenDNS / URL');
+        return;
+    }
+    if (!login) {
+        alert('Укажите логин');
+        return;
+    }
+
+    const saveBtn = document.getElementById(id)?.querySelector('.btn-primary');
     if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳ Сохранение...'; }
     try {
-        const resp = await fetch(`/api/keenetic/${encodeURIComponent(name)}`, {
+        const body = {name: newName, web_url, login, anydesk, refresh: true};
+        if (password) body.password = password;
+
+        const resp = await fetch(`/api/keenetic/${encodeURIComponent(oldName)}`, {
             method: 'PATCH',
             credentials: 'include',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({web_url, refresh: true}),
+            body: JSON.stringify(body),
         });
         const data = await resp.json();
         if (data.status !== 'ok') {
@@ -1624,7 +1674,6 @@ async function saveKeeneticUrl(name) {
             return;
         }
         await loadKeenetic();
-        toggleKeeneticUrlEdit(name);
     } catch (e) {
         alert('Ошибка: ' + e.message);
     } finally {

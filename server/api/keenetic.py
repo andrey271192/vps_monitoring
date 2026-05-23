@@ -253,9 +253,17 @@ async def keenetic_add_bulk(request: Request, user: str = Depends(require_auth))
 
 @router.patch("/{name}")
 async def keenetic_update(name: str, request: Request, user: str = Depends(require_auth)):
-    """Update KeenDNS/web URL for a router (web_url + host)."""
+    """Update router fields: name, web_url/host, login, password, anydesk."""
     body = await request.json()
-    web_url_raw = (body.get("web_url") or body.get("url") or "").strip()
+    devices = _load_keenetic()
+    idx = next((i for i, d in enumerate(devices) if d["name"] == name), None)
+    if idx is None:
+        return {"status": "error", "detail": "router not found"}
+
+    dev = devices[idx]
+    old_name = name
+
+    web_url_raw = (body.get("web_url") or body.get("url") or body.get("host") or "").strip()
     if not web_url_raw:
         return {"status": "error", "detail": "web_url required"}
 
@@ -264,20 +272,49 @@ async def keenetic_update(name: str, request: Request, user: str = Depends(requi
     except ValueError as e:
         return {"status": "error", "detail": str(e)}
 
-    devices = _load_keenetic()
-    idx = next((i for i, d in enumerate(devices) if d["name"] == name), None)
-    if idx is None:
-        return {"status": "error", "detail": "router not found"}
+    dev["web_url"] = web_url
+    dev["host"] = host
 
-    devices[idx]["web_url"] = web_url
-    devices[idx]["host"] = host
+    if "login" in body:
+        login = (body.get("login") or "").strip()
+        if not login:
+            return {"status": "error", "detail": "login required"}
+        dev["login"] = login
+
+    password = body.get("password")
+    if password:
+        dev["password"] = password
+
+    if "anydesk" in body:
+        dev["anydesk"] = (body.get("anydesk") or "").strip()
+
+    new_name = (body.get("name") or "").strip()
+    final_name = old_name
+    if new_name:
+        if new_name != old_name:
+            if any(d["name"] == new_name for j, d in enumerate(devices) if j != idx):
+                return {"status": "error", "detail": f"Роутер «{new_name}» уже существует"}
+            final_name = new_name
+        dev["name"] = new_name
+
+    devices[idx] = dev
     _save_keenetic(devices)
-    keenetic_metrics.pop(name, None)
 
-    result = {"status": "ok", "web_url": web_url, "host": host}
+    keenetic_metrics.pop(old_name, None)
+    if final_name != old_name:
+        keenetic_metrics.pop(final_name, None)
+
+    result = {
+        "status": "ok",
+        "name": final_name,
+        "web_url": web_url,
+        "host": host,
+        "login": dev.get("login", "admin"),
+        "anydesk": dev.get("anydesk", ""),
+    }
     if body.get("refresh", True):
         try:
-            metrics = await _refresh_device_locked(devices[idx])
+            metrics = await _refresh_device_locked(dev)
             result["metrics"] = metrics
         except Exception as e:
             result["refresh_error"] = str(e)
