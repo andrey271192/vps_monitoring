@@ -23,6 +23,12 @@ logger = logging.getLogger(__name__)
 active_issues: Dict[Tuple[str, str, str], datetime] = {}
 # Sustained problems waiting for threshold: {issue_key: datetime_first_seen}
 _pending_sustain: Dict[Tuple[str, str, str], datetime] = {}
+# Keenetic router offline: last confirmed online + last alert sent (cooldown)
+_keenetic_last_online: Dict[str, datetime] = {}
+_keenetic_alert_sent: Dict[str, datetime] = {}
+
+KEENETIC_OFFLINE_SUSTAIN = 300  # 5 min sustained failure before alert
+KEENETIC_OFFLINE_COOLDOWN = 1800  # 30 min between repeat offline alerts
 
 
 def _issue_key(category: str, source: str, key: str) -> tuple:
@@ -331,6 +337,77 @@ async def _check_ha(settings: dict):
 
 # ==================== KEENETIC ====================
 
+async def _verify_keenetic_reachable(dev: dict) -> bool:
+    """Second auth check before firing offline alert (filter poll glitches)."""
+    from server.api.keenetic import _client_for_device
+
+    client = _client_for_device(dev)
+    try:
+        return await client.authenticate()
+    except Exception as e:
+        logger.warning(f"Keenetic re-verify {dev.get('name')}: {e}")
+        return False
+    finally:
+        await client.close()
+
+
+async def _check_keenetic_offline(name: str, dev: dict, online: bool):
+    """Router offline: 5 min sustain, re-verify, cooldown, single recovery."""
+    category = "keenetic"
+    key = "offline"
+    ik = _issue_key(category, name, key)
+    now = datetime.now()
+    was_active = ik in active_issues
+
+    if not online:
+        if ik not in _pending_sustain:
+            _pending_sustain[ik] = now
+        elapsed = (now - _pending_sustain[ik]).total_seconds()
+
+        if elapsed >= KEENETIC_OFFLINE_SUSTAIN and not was_active:
+            last_alert = _keenetic_alert_sent.get(name)
+            last_online = _keenetic_last_online.get(name)
+            if last_alert and (now - last_alert).total_seconds() < KEENETIC_OFFLINE_COOLDOWN:
+                if not last_online or last_online <= last_alert:
+                    return
+
+            if await _verify_keenetic_reachable(dev):
+                _pending_sustain.pop(ik, None)
+                _keenetic_last_online[name] = now
+                logger.info(f"Keenetic offline suppressed (re-verify OK): {name}")
+                return
+
+            active_issues[ik] = _pending_sustain[ik]
+            _keenetic_alert_sent[name] = now
+            host = dev.get("host", "")
+            ts = now.strftime("%H:%M %d.%m.%Y")
+            if not _is_device_muted(category, name):
+                await _fire_alert(
+                    f"🔴 *Router {name}* - OFFLINE 5+ мин!\n"
+                    f"Хост: `{host}`\n"
+                    f"Время: {ts}",
+                    f"Router {name}",
+                    category,
+                )
+                logger.info(f"Keenetic sustained offline alert: {name}")
+            else:
+                logger.info(f"Keenetic offline alert suppressed (muted): {name}")
+    else:
+        _keenetic_last_online[name] = now
+        _pending_sustain.pop(ik, None)
+        if was_active:
+            del active_issues[ik]
+            if not _is_device_muted(category, name):
+                await _fire_alert(
+                    f"🟢 *Router {name}* - back online",
+                    f"Router {name} resolved",
+                    category,
+                )
+                logger.info(f"Keenetic offline resolved: {name}")
+            else:
+                logger.info(f"Keenetic offline resolved (muted): {name}")
+
+
 async def _check_keenetic(settings: dict):
     """Check Keenetic routers."""
     from server.api.keenetic import keenetic_metrics, _load_keenetic
@@ -346,13 +423,7 @@ async def _check_keenetic(settings: dict):
 
         online = m.get("online", False)
 
-        await _check_issue(
-            "keenetic", name, "offline",
-            is_problem=not online,
-            alert_msg=f"🔴 *Router {name}* - OFFLINE!",
-            resolve_msg=f"🟢 *Router {name}* - back online",
-            subject=f"Router {name}",
-        )
+        await _check_keenetic_offline(name, dev, online)
 
         if not online:
             continue

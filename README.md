@@ -111,7 +111,7 @@ cd /opt/vps-monitoring
 Настройка: `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` в systemd или settings.
 
 Keenetic алерты:
-- Router offline / back online
+- Router offline 5+ мин (sustained + re-verify) / back online
 - No internet
 - CPU/RAM > 90%
 - **VPN down 5+ минут** (sustained, deduplicated)
