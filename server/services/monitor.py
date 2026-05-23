@@ -1,12 +1,11 @@
 import asyncio
-import json
 import logging
 from datetime import datetime
 from typing import Dict
 
 import asyncssh
 
-from server.config import load_servers, load_settings, DATA_DIR
+from server.config import load_servers, load_settings, save_json, METRICS_FILE
 
 logger = logging.getLogger(__name__)
 
@@ -143,10 +142,7 @@ async def monitor_loop():
                     else:
                         metrics_cache[srv["host"]] = result
 
-                # Save metrics to file
-                metrics_file = DATA_DIR / "metrics.json"
-                with open(metrics_file, "w") as f:
-                    json.dump(metrics_cache, f, indent=2)
+                save_json(METRICS_FILE, metrics_cache)
 
             await asyncio.sleep(interval)
 

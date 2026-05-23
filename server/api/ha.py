@@ -1,13 +1,12 @@
 """Home Assistant monitoring API endpoints."""
 
-import json
 from datetime import datetime
 from typing import Dict
 
 from fastapi import APIRouter, Request, Depends
 
 from server.auth import require_auth
-from server.config import DATA_DIR
+from server.config import DATA_DIR, load_json, save_json
 
 router = APIRouter(prefix="/api/ha", tags=["homeassistant"])
 
@@ -18,15 +17,11 @@ HA_FILE = DATA_DIR / "homeassistant.json"
 
 
 def _load_ha():
-    if HA_FILE.exists():
-        with open(HA_FILE) as f:
-            return json.load(f)
-    return []
+    return load_json(HA_FILE, [])
 
 
 def _save_ha(data):
-    with open(HA_FILE, "w") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    save_json(HA_FILE, data)
 
 
 @router.get("/list")

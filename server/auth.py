@@ -1,24 +1,23 @@
 import hashlib
 import hmac
-import json
+import os
 from datetime import datetime, timedelta
 from urllib.parse import parse_qs
 
 from jose import jwt
-from passlib.context import CryptContext
 from fastapi import Request, HTTPException
-from fastapi.responses import RedirectResponse
 from server.config import load_settings
 
-SECRET_KEY = "vps-monitoring-secret-key-change-me-in-production"
+# Allow override via env so a single deployment can rotate secrets without
+# rebaking the image. Falls back to a known value for backwards compatibility.
+SECRET_KEY = os.getenv("VPS_MONITORING_SECRET", "vps-monitoring-secret-key-change-me-in-production")
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 24
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return plain_password == hashed_password
+def verify_password(plain_password: str, stored_password: str) -> bool:
+    """Plain-text comparison — admin password is stored verbatim in settings.json."""
+    return plain_password == stored_password
 
 
 def create_token(username: str) -> str:

@@ -1,16 +1,15 @@
 """Synology NAS monitoring API endpoints."""
 
-import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict
 
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import PlainTextResponse
 
 from server.auth import require_auth
-from server.config import DATA_DIR, BASE_DIR
+from server.config import DATA_DIR, BASE_DIR, load_json, save_json
 
 router = APIRouter(prefix="/api/synology", tags=["synology"])
 
@@ -25,15 +24,11 @@ SYNOLOGY_FILE = DATA_DIR / "synology.json"
 
 
 def _load_synology():
-    if SYNOLOGY_FILE.exists():
-        with open(SYNOLOGY_FILE) as f:
-            return json.load(f)
-    return []
+    return load_json(SYNOLOGY_FILE, [])
 
 
 def _save_synology(data):
-    with open(SYNOLOGY_FILE, "w") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    save_json(SYNOLOGY_FILE, data)
 
 
 @router.get("/list")

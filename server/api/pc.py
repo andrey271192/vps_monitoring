@@ -1,11 +1,10 @@
-import json
 from datetime import datetime
 from typing import Dict
 
 from fastapi import APIRouter, Request, Depends
 
 from server.auth import require_auth
-from server.config import DATA_DIR
+from server.config import DATA_DIR, load_json, save_json
 
 router = APIRouter(prefix="/api/pc", tags=["pc"])
 
@@ -16,15 +15,11 @@ PC_FILE = DATA_DIR / "pc_agents.json"
 
 
 def _load_pc_data():
-    if PC_FILE.exists():
-        with open(PC_FILE) as f:
-            return json.load(f)
-    return {}
+    return load_json(PC_FILE, {})
 
 
 def _save_pc_data(data):
-    with open(PC_FILE, "w") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    save_json(PC_FILE, data)
 
 
 @router.post("/heartbeat")

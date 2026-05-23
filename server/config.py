@@ -1,5 +1,6 @@
 import os
 import json
+import tempfile
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -22,26 +23,49 @@ DEFAULT_SETTINGS = {
 }
 
 
+def load_json(path: Path, default):
+    """Load JSON with explicit UTF-8 and a sane default on missing/corrupt file."""
+    try:
+        if path.exists():
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        # Don't crash the whole app if a data file is malformed; fall back to default.
+        pass
+    return default
+
+
+def save_json(path: Path, data) -> None:
+    """Atomic JSON write: dump to temp file then rename. Survives crashes mid-write."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        os.replace(tmp_path, path)
+    except Exception:
+        if os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        raise
+
+
 def load_settings():
     if SETTINGS_FILE.exists():
-        with open(SETTINGS_FILE) as f:
-            return json.load(f)
+        return load_json(SETTINGS_FILE, dict(DEFAULT_SETTINGS))
     save_settings(DEFAULT_SETTINGS)
-    return DEFAULT_SETTINGS.copy()
+    return dict(DEFAULT_SETTINGS)
 
 
 def save_settings(settings):
-    with open(SETTINGS_FILE, "w") as f:
-        json.dump(settings, f, indent=2, ensure_ascii=False)
+    save_json(SETTINGS_FILE, settings)
 
 
 def load_servers():
-    if SERVERS_FILE.exists():
-        with open(SERVERS_FILE) as f:
-            return json.load(f)
-    return []
+    return load_json(SERVERS_FILE, [])
 
 
 def save_servers(servers):
-    with open(SERVERS_FILE, "w") as f:
-        json.dump(servers, f, indent=2, ensure_ascii=False)
+    save_json(SERVERS_FILE, servers)

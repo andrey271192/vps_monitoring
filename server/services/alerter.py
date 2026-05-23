@@ -9,12 +9,11 @@ Logic per issue:
 State tracked per (source, issue_key) pair.
 """
 
-import json
 import logging
 from datetime import datetime
 from typing import Dict, Tuple
 
-from server.config import load_settings, load_servers, DATA_DIR
+from server.config import load_settings, load_servers, load_json, DATA_DIR
 from server.services.monitor import get_all_metrics
 
 logger = logging.getLogger(__name__)
@@ -27,8 +26,20 @@ _pending_sustain: Dict[Tuple[str, str, str], datetime] = {}
 _keenetic_last_online: Dict[str, datetime] = {}
 _keenetic_alert_sent: Dict[str, datetime] = {}
 
+# Sustain windows (seconds before firing offline alert)
+OFFLINE_SUSTAIN_SEC = 300       # 5 min for VPS / PC / Synology / HA
 KEENETIC_OFFLINE_SUSTAIN = 300  # 5 min sustained failure before alert
 KEENETIC_OFFLINE_COOLDOWN = 1800  # 30 min between repeat offline alerts
+
+# Startup grace: skip OFFLINE alerts for the first STARTUP_GRACE_SEC seconds
+# after the alerter module is loaded (i.e. process restart). Prevents the
+# mass-phantom alert storm when the monitor hasn't completed its first poll yet.
+STARTUP_GRACE_SEC = 300
+_startup_at = datetime.now()
+
+
+def _in_startup_grace() -> bool:
+    return (datetime.now() - _startup_at).total_seconds() < STARTUP_GRACE_SEC
 
 
 def _issue_key(category: str, source: str, key: str) -> tuple:
@@ -79,8 +90,14 @@ async def _check_issue(category: str, source: str, key: str, is_problem: bool,
 
 async def _check_sustained_issue(category: str, source: str, key: str, is_problem: bool,
                                  alert_msg: str, resolve_msg: str, subject: str,
-                                 sustain_seconds: int = 300):
-    """Alert only after problem persists for sustain_seconds (default 5 min)."""
+                                 sustain_seconds: int = 300,
+                                 honor_startup_grace: bool = False):
+    """Alert only after problem persists for sustain_seconds (default 5 min).
+
+    When honor_startup_grace=True, suppress alerts entirely until the process
+    has been running for STARTUP_GRACE_SEC. Pending state is still tracked so
+    the sustain window starts ticking from first detection.
+    """
     ik = _issue_key(category, source, key)
     was_active = ik in active_issues
     now = datetime.now()
@@ -90,6 +107,9 @@ async def _check_sustained_issue(category: str, source: str, key: str, is_proble
             _pending_sustain[ik] = now
         elapsed = (now - _pending_sustain[ik]).total_seconds()
         if elapsed >= sustain_seconds and not was_active:
+            if honor_startup_grace and _in_startup_grace():
+                logger.info(f"Sustained alert deferred (startup grace): {category}/{source}/{key}")
+                return
             active_issues[ik] = _pending_sustain[ik]
             if not _is_device_muted(category, source):
                 await _fire_alert(alert_msg, subject, category)
@@ -139,13 +159,15 @@ async def _check_servers(settings: dict):
         m = metrics.get(host, {})
         online = m.get("online", False)
 
-        # Online/Offline
-        await _check_issue(
+        # Online/Offline — 5 min sustain + startup grace to avoid phantom alerts
+        await _check_sustained_issue(
             "servers", name, "offline",
             is_problem=not online,
-            alert_msg=f"🔴 *{name}* ({host}) - OFFLINE!",
+            alert_msg=f"🔴 *{name}* ({host}) - OFFLINE 5+ мин!",
             resolve_msg=f"🟢 *{name}* ({host}) - back online",
             subject=f"{name} offline",
+            sustain_seconds=OFFLINE_SUSTAIN_SEC,
+            honor_startup_grace=True,
         )
 
         if not online:
@@ -190,8 +212,7 @@ async def _check_pc(settings: dict):
     if not pc_file.exists():
         return
 
-    with open(pc_file) as f:
-        pc_data = json.load(f)
+    pc_data = load_json(pc_file, {})
 
     now = datetime.now()
 
@@ -199,16 +220,19 @@ async def _check_pc(settings: dict):
         last_seen = data.get("last_seen", "")
         try:
             last_dt = datetime.fromisoformat(last_seen)
-            stale = (now - last_dt).total_seconds() > 180  # 3 min
+            stale = (now - last_dt).total_seconds() > 180  # 3 min no heartbeat
         except Exception:
             stale = True
 
-        await _check_issue(
+        # 5 min sustain on top of the 3 min stale window + startup grace
+        await _check_sustained_issue(
             "pc", name, "offline",
             is_problem=stale,
-            alert_msg=f"🔴 *PC {name}* - no heartbeat for 3+ min",
+            alert_msg=f"🔴 *PC {name}* - нет heartbeat 5+ мин",
             resolve_msg=f"🟢 *PC {name}* - back online",
             subject=f"PC {name}",
+            sustain_seconds=OFFLINE_SUSTAIN_SEC,
+            honor_startup_grace=True,
         )
 
 
@@ -229,12 +253,14 @@ async def _check_synology(settings: dict):
 
         online = m.get("online", False)
 
-        await _check_issue(
+        await _check_sustained_issue(
             "synology", name, "offline",
             is_problem=not online,
-            alert_msg=f"🔴 *NAS {name}* - OFFLINE!",
+            alert_msg=f"🔴 *NAS {name}* - OFFLINE 5+ мин!",
             resolve_msg=f"🟢 *NAS {name}* - back online",
             subject=f"NAS {name}",
+            sustain_seconds=OFFLINE_SUSTAIN_SEC,
+            honor_startup_grace=True,
         )
 
         if not online:
@@ -302,12 +328,14 @@ async def _check_ha(settings: dict):
 
         online = m.get("online", False)
 
-        await _check_issue(
+        await _check_sustained_issue(
             "ha", name, "offline",
             is_problem=not online,
-            alert_msg=f"🔴 *HA {name}* - OFFLINE!",
+            alert_msg=f"🔴 *HA {name}* - OFFLINE 5+ мин!",
             resolve_msg=f"🟢 *HA {name}* - back online",
             subject=f"HA {name}",
+            sustain_seconds=OFFLINE_SUSTAIN_SEC,
+            honor_startup_grace=True,
         )
 
         if not online:
@@ -365,6 +393,10 @@ async def _check_keenetic_offline(name: str, dev: dict, online: bool):
         elapsed = (now - _pending_sustain[ik]).total_seconds()
 
         if elapsed >= KEENETIC_OFFLINE_SUSTAIN and not was_active:
+            if _in_startup_grace():
+                logger.info(f"Keenetic offline deferred (startup grace): {name}")
+                return
+
             last_alert = _keenetic_alert_sent.get(name)
             last_online = _keenetic_last_online.get(name)
             if last_alert and (now - last_alert).total_seconds() < KEENETIC_OFFLINE_COOLDOWN:
@@ -513,8 +545,7 @@ async def get_full_status() -> str:
     # PC
     pc_file = DATA_DIR / "pc_agents.json"
     if pc_file.exists():
-        with open(pc_file) as f:
-            pc_data = json.load(f)
+        pc_data = load_json(pc_file, {})
         if pc_data:
             lines.append("\n*PC Agents:*")
             now = datetime.now()

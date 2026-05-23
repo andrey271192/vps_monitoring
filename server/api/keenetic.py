@@ -1,7 +1,6 @@
 """Keenetic router monitoring API endpoints."""
 
 import asyncio
-import json
 import logging
 from datetime import datetime
 from typing import Dict, List
@@ -10,7 +9,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Request, Depends
 
 from server.auth import require_auth
-from server.config import DATA_DIR, load_settings
+from server.config import DATA_DIR, load_settings, load_json, save_json
 from server.services.keenetic_client import (
     KeeneticClient,
     normalize_web_url,
@@ -31,15 +30,11 @@ REFRESH_ALL_GAP_SEC = 2
 
 
 def _load_keenetic():
-    if KEENETIC_FILE.exists():
-        with open(KEENETIC_FILE) as f:
-            return json.load(f)
-    return []
+    return load_json(KEENETIC_FILE, [])
 
 
 def _save_keenetic(data):
-    with open(KEENETIC_FILE, "w") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    save_json(KEENETIC_FILE, data)
 
 
 def _host_from_url(url: str) -> str:
