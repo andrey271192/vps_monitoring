@@ -320,6 +320,8 @@ async def keenetic_update(name: str, request: Request, user: str = Depends(requi
 @router.delete("/{name}")
 async def keenetic_delete(name: str, request: Request, user: str = Depends(require_auth)):
     devices = _load_keenetic()
+    if not any(d["name"] == name for d in devices):
+        return {"status": "error", "detail": "router not found"}
     devices = [d for d in devices if d["name"] != name]
     _save_keenetic(devices)
     keenetic_metrics.pop(name, None)

@@ -1378,7 +1378,7 @@ async function showKeeneticDetail(name) {
 
     // Fetch clients + interfaces lazily
     try {
-        const resp = await fetch(`/api/keenetic/detail/${name}`, {credentials: 'include'});
+        const resp = await fetch(`/api/keenetic/detail/${encodeURIComponent(name)}`, {credentials: 'include'});
         const data = await resp.json();
         const extra = document.getElementById('keeneticDetailExtra');
         if (!extra) return;
@@ -1558,7 +1558,7 @@ async function refreshKeenetic(name) {
     const card = document.querySelector(`[data-keen="${name}"]`);
     if (card) card.classList.add('loading');
     try {
-        const resp = await fetch(`/api/keenetic/refresh/${name}`, {
+        const resp = await fetch(`/api/keenetic/refresh/${encodeURIComponent(name)}`, {
             method: 'POST', credentials: 'include',
         });
         const resp2 = await fetch('/api/keenetic/list', {credentials: 'include'});
@@ -1593,7 +1593,7 @@ async function refreshAllKeenetic() {
 async function rebootKeenetic(name) {
     if (!confirm(`Перезагрузить роутер "${name}"?`)) return;
     try {
-        const resp = await fetch(`/api/keenetic/reboot/${name}`, {
+        const resp = await fetch(`/api/keenetic/reboot/${encodeURIComponent(name)}`, {
             method: 'POST', credentials: 'include',
         });
         const data = await resp.json();
@@ -1682,11 +1682,16 @@ async function saveKeeneticEdit(oldName) {
 }
 
 async function deleteKeenetic(name) {
-    if (!confirm(`Удалить роутер "${name}"?`)) return;
+    if (!confirm(`Удалить роутер "${name}" из мониторинга?`)) return;
     try {
-        await fetch(`/api/keenetic/${name}`, {
+        const resp = await fetch(`/api/keenetic/${encodeURIComponent(name)}`, {
             method: 'DELETE', credentials: 'include',
         });
+        const data = await resp.json();
+        if (!resp.ok || data.status === 'error') {
+            alert(`❌ Не удалось удалить: ${data.detail || resp.statusText}`);
+            return;
+        }
         await loadKeenetic();
     } catch (e) { alert('Error: ' + e.message); }
 }
