@@ -157,6 +157,6 @@ cd /opt/vps-monitoring && git pull && systemctl restart vps-monitoring
 
 ## Автор
 
-**@Iot_andrey** — [GitHub](https://github.com/andrey271192) · [Telegram](https://t.me/Iot_andrey)
+**@PCAdministration** — [GitHub](https://github.com/andrey271192) · [Telegram](https://t.me/PCAdministration)
 
 MIT
